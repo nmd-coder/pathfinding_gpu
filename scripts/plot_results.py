@@ -162,12 +162,31 @@ def plot_mapping():
     save(fig, "mapping.png")
 
 
+def plot_sync():
+    files = [f for f in os.listdir(RES) if f.startswith("study_sync_") and f.endswith(".csv")]
+    for f in files:
+        rows = read(os.path.join(RES, f))
+        if not rows:
+            continue
+        groups = list(dict.fromkeys((r["algorithm"], r["query"]) for r in rows))
+        fig, ax = plt.subplots(figsize=(6.4, 4.2))
+        for (a, q) in groups:
+            rs = [r for r in rows if (r["algorithm"], r["query"]) == (a, q)]
+            ax.plot([int(r["sync_every"]) for r in rs], [float(r["time_ms"]) for r in rs], marker="o", label=f"{a} ({q})")
+        ax.set_xscale("log", base=2)
+        ax.set_xlabel("Kernels launched per host synchronization (S)"); ax.set_ylabel("Time (ms)")
+        ax.set_title(f"Reducing host-device synchronization: {rows[0]['graph']}")
+        ax.legend()
+        save(fig, f.replace("study_", "").replace(".csv", ".png"))
+
+
 if __name__ == "__main__":
     print(f"Reading CSV from {RES}/")
     plot_summary(read(os.path.join(RES, "summary_speedup.csv")))
-    plot_summary(read(os.path.join(RES, "rmat", "summary_speedup.csv")), "_rmat")
+    plot_summary(read(os.path.join(RES, "rmat", "summary_speedup.csv")))
     plot_atomic(read(os.path.join(RES, "study_atomic.csv")))
     plot_delta()
+    plot_sync()
     plot_multisource(read(os.path.join(RES, "study_multisource.csv")))
     plot_mapping()
     print("Done.")

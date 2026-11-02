@@ -97,7 +97,14 @@ atomicMin(&state[v], (nd << 32) | u)      // cập nhật dist + parent trong 1 
 * GPU A*: cắt tỉa mọi cạnh có `g + h ≥ dist[target]` (cận trên hiện tại); Delta-Stepping dùng khóa
   `f = g + h` (tương đương Dijkstra trên trọng số rút gọn) và dừng khi bucket nhỏ nhất ≥ `dist[target]`.
 
-### 3.5 Cân bằng tải (Hybrid)
+### 3.5 Giảm đồng bộ Host–Device (`--sync-every S`)
+Cách truyền thống: sau **mỗi** vòng nới lỏng, Host phải `cudaStreamSynchronize` để đọc kích thước
+`F_next` rồi mới khởi chạy vòng sau. Trên mạng đường bộ (hàng nghìn vòng, mỗi vòng ít việc) chi phí
+này (~30 µs/vòng) chiếm phần lớn thời gian. Cải tiến: kernel **tự đọc kích thước biên từ bộ đếm trên GPU**
+(`RelaxCtx::inCount`) và chạy grid cố định theo số SM với vòng grid-stride; Host phát liên tiếp S kernel
+rồi mới đồng bộ 1 lần. Kernel phát thừa khi biên đã rỗng kết thúc ngay. `--mode sync` đo S = 1…32.
+
+### 3.6 Cân bằng tải (Hybrid)
 Theo bậc đỉnh trong biên: bậc ≥ blockDim → cả block xử lý (thông tin phát qua **Shared Memory**);
 bậc ≥ 32 → cả warp (`__ballot_sync` + `__shfl_sync`); còn lại → từng luồng. Tránh warp divergence
 nặng trên đồ thị bậc lũy thừa (R-MAT, mạng xã hội).
@@ -141,15 +148,18 @@ pathfinder.exe --mode bench  --family grid --sizes 1e4,1e5,1e6,4e6 --queries 5
 pathfinder.exe --mode bench  --family both
 pathfinder.exe --mode atomic --graph grid --n 1e6
 pathfinder.exe --mode delta  --graph grid --n 1e6
+pathfinder.exe --mode sync   --graph grid --n 1e6          :: giảm đồng bộ Host-Device (S = 1..32)
 pathfinder.exe --mode mapping --graph rmat --n 1048576
 pathfinder.exe --mode transfer --graph grid --n 4e6
 pathfinder.exe --mode multisource --graph grid --n 1e6 --batch 32
 pathfinder.exe --mode single --graph grid --n 1e6 --astar --algo delta --print-path
-:: Bản đồ thật DIMACS (tải bằng scripts\download_dimacs.ps1 NY)
+:: Bản đồ thật DIMACS (tải bằng scripts\download_dimacs.ps1 NY; nếu máy chủ DIMACS không truy cập được,
+:: script tự tải SNAP roadNet-PA của Stanford)
+pathfinder.exe --mode bench --graph snap --file data\roadNet-PA.txt --directed --queries 5
 pathfinder.exe --mode bench --gr data\USA-road-d.NY.gr --co data\USA-road-d.NY.co --queries 5 --save-bin data\ny.bin
 pathfinder.exe --mode verify --graph bin --file data\ny.bin
 ```
-Tùy chọn GPU: `--mapping thread|warp|hybrid`, `--atomic min|cas|nocheck`, `--delta D`, `--block 256`.
+Tùy chọn GPU: `--mapping thread|warp|hybrid`, `--atomic min|cas|nocheck`, `--delta D`, `--block 256`, `--sync-every S` (mặc định 8; 1 = đồng bộ mỗi vòng).
 Tắt màu khi ghi log ra file: `--no-color`.
 
 ### Ý nghĩa các cột trong bảng

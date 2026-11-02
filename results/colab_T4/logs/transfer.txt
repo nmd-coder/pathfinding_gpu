@@ -1,0 +1,33 @@
+
+  ==========================================================================================
+  ## GPU-Accelerated Parallel Dijkstra / A*  |  CSR + Frontier + Delta-Stepping + Atomics ##
+  ==========================================================================================
+    (generated + CSR built in 798.0 ms)
+  Graph  grid_2000x2000
+    Vertices (n)      : 4000000
+    Directed arcs (m) : 16041488   (avg degree 4.01, max degree 8)
+    Weights           : [51 .. 393], mean 156.0
+    Coordinates       : yes   (admissible h-scale = 0.992209)
+    CSR size          : 137.65 MB  (row_offsets + col_indices + weights)
+
+>>> Host -> Device transfer of CSR arrays: grid_2000x2000
+
+  CSR upload (137.6 MB), average of 5 runs
+  +--------------------------------------+-----------+------------------+-------------+
+  | Method                               | Time (ms) | Bandwidth (GB/s) | vs pageable |
+  +======================================+===========+==================+=============+
+  | cudaMemcpy (pageable)                |     31.42 |             4.59 |       1.00x |
+  | cudaMemcpyAsync (pinned)             |     11.69 |            12.35 |       2.69x |
+  | pinned + 3 CUDA streams (8MB chunks) |     11.77 |            12.26 |       2.67x |
+  +--------------------------------------+-----------+------------------+-------------+
+
+  ================================
+  ## FINAL VERIFICATION SUMMARY ##
+  ================================
+  GPU runs verified       : 0
+  Distance comparisons    : 0
+  Parent-tree checks      : 0
+  Reconstructed paths     : 0
+  Errors                  : 0
+  >>> PASS 100.00% <<<
+

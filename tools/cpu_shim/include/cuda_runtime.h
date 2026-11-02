@@ -8,7 +8,7 @@
 typedef int cudaError_t;
 enum { cudaSuccess = 0, cudaErrorMemoryAllocation = 2 };
 enum cudaMemcpyKind { cudaMemcpyHostToHost, cudaMemcpyHostToDevice, cudaMemcpyDeviceToHost, cudaMemcpyDeviceToDevice, cudaMemcpyDefault };
-enum cudaDeviceAttr { cudaDevAttrClockRate, cudaDevAttrMemoryClockRate, cudaDevAttrGlobalMemoryBusWidth };
+enum cudaDeviceAttr { cudaDevAttrClockRate, cudaDevAttrMemoryClockRate, cudaDevAttrGlobalMemoryBusWidth, cudaDevAttrMultiProcessorCount, cudaDevAttrMaxThreadsPerMultiProcessor };
 struct CUstream_st {};
 struct CUevent_st { std::chrono::steady_clock::time_point t; };
 typedef CUstream_st* cudaStream_t;
@@ -29,7 +29,7 @@ inline cudaError_t cudaGetDeviceProperties(cudaDeviceProp* p, int) {
     p->totalGlobalMem = 8ull << 30; p->sharedMemPerBlock = 48 << 10; p->l2CacheSize = 0;
     return cudaSuccess;
 }
-inline cudaError_t cudaDeviceGetAttribute(int* v, cudaDeviceAttr, int) { *v = 0; return cudaSuccess; }
+inline cudaError_t cudaDeviceGetAttribute(int* v, cudaDeviceAttr a, int) { *v = a == cudaDevAttrMultiProcessorCount ? 2 : a == cudaDevAttrMaxThreadsPerMultiProcessor ? 1024 : 0; return cudaSuccess; }
 inline cudaError_t cudaDriverGetVersion(int* v) { *v = 0; return cudaSuccess; }
 inline cudaError_t cudaRuntimeGetVersion(int* v) { *v = 0; return cudaSuccess; }
 inline cudaError_t cudaMemGetInfo(size_t* f, size_t* t) { *f = 8ull << 30; *t = 8ull << 30; return cudaSuccess; }

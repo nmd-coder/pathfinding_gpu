@@ -11,6 +11,7 @@
 //    bench       : benchmark SSSP + A* theo nhiều kích thước đồ thị
 //    atomic      : thí nghiệm giảm tranh chấp atomic (Read-Before-Atomic, CAS, no-check)
 //    delta       : quét tham số Delta
+//    sync        : số kernel phát liên tiếp giữa 2 lần đồng bộ Host-Device (giảm overhead đồng bộ)
 //    mapping     : Thread / Warp / Hybrid (cân bằng tải)
 //    transfer    : pageable vs pinned vs pinned+streams
 //    multisource : nhiều nguồn: GPU batch vs CPU 1 luồng vs CPU OpenMP
@@ -63,7 +64,7 @@ struct Config {
 static void usage() {
     printf(
         "Usage: pathfinder [--mode MODE] [options]\n"
-        "  --mode demo|all|info|verify|bench|atomic|delta|mapping|transfer|multisource|single\n"
+        "  --mode demo|all|info|verify|bench|atomic|delta|sync|mapping|transfer|multisource|single\n"
         "Graph source (verify/atomic/delta/mapping/transfer/multisource/single):\n"
         "  --graph grid|rmat|dimacs|snap|bin   (default grid)\n"
         "  --n N              number of vertices for grid/rmat (e.g. 1e6)\n"
@@ -76,6 +77,7 @@ static void usage() {
         "  --family grid|rmat|both   --sizes 1e4,1e5,1e6   --queries Q\n"
         "GPU options:\n"
         "  --mapping thread|warp|hybrid   --atomic min|cas|nocheck   --delta D   --block B\n"
+        "  --sync-every S     launch S relaxation kernels per host synchronization (default 8, 1 = classic)\n"
         "Single query:\n"
         "  --algo naive|frontier|delta  --astar  --src S --dst T  --print-path\n"
         "Other:\n"
@@ -129,6 +131,7 @@ static bool parseArgs(int argc, char** argv, Config& c) {
         }
         else if (a == "--delta") c.gpu.delta = (u32)parseNum(next());
         else if (a == "--block") c.gpu.blockSize = (int)parseNum(next());
+        else if (a == "--sync-every") c.gpu.syncEvery = std::max<u32>(1, (u32)parseNum(next()));
         else if (a == "--batch") c.batch = std::max<u32>(1, (u32)parseNum(next()));
         else if (a == "--threads") c.threads = (int)parseNum(next());
         else if (a == "--out") c.outDir = next();
@@ -342,7 +345,7 @@ static void benchGraph(const CSRGraph& g, const Config& c, GpuSolver& solver, Cs
 
     const size_t NV = vs.size();
     double cpuMs = 0, cpuEdges = 0, mReached = 0;
-    std::vector<double> ms(NV, 0), edges(NV, 0), iters(NV, 0), buckets(NV, 0);
+    std::vector<double> ms(NV, 0), edges(NV, 0), iters(NV, 0), buckets(NV, 0), syncs(NV, 0);
     std::vector<VerifyReport> vr(NV);
     // A*
     double cpuAms = 0, cpuAedges = 0, cpuDijP2P = 0;
@@ -358,6 +361,7 @@ static void benchGraph(const CSRGraph& g, const Config& c, GpuSolver& solver, Cs
         for (size_t i = 0; i < NV; ++i) {
             GpuRunResult r = solver.sssp(s, vs[i].o, true);
             ms[i] += r.ms; edges[i] += r.stats.edgesScanned; iters[i] += r.stats.iterations; buckets[i] += r.stats.buckets;
+            syncs[i] += r.stats.hostSyncs;
             vr[i].merge(verifySSSP(g, s, ref.dist, r.dist, r.parent, c.samplePaths, c.seed + q));
         }
         // A* điểm - điểm
@@ -373,28 +377,28 @@ static void benchGraph(const CSRGraph& g, const Config& c, GpuSolver& solver, Cs
     }
     const double Q = (double)srcs.size();
     cpuMs /= Q; cpuEdges /= Q; mReached /= Q; cpuAms /= Q; cpuAedges /= Q; cpuDijP2P /= Q;
-    for (size_t i = 0; i < NV; ++i) { ms[i] /= Q; edges[i] /= Q; iters[i] /= Q; buckets[i] /= Q; ams[i] /= Q; aedges[i] /= Q; }
+    for (size_t i = 0; i < NV; ++i) { ms[i] /= Q; edges[i] /= Q; iters[i] /= Q; buckets[i] /= Q; syncs[i] /= Q; ams[i] /= Q; aedges[i] /= Q; }
 
     // ---------------- Bảng SSSP ----------------
     Table t("SSSP (single-source shortest path), average of " + fmt("%.0f", Q) + " sources | TEPS = reachable arcs / time");
-    t.setHeader({"Method", "Time (ms)", "Iter", "Edges scanned", "Work/m", "MTEPS", "Speedup", "Verify"}, "lrrrrrrl");
+    t.setHeader({"Method", "Time (ms)", "Iter", "Syncs", "Edges scanned", "Work/m", "MTEPS", "Speedup", "Verify"}, "lrrrrrrrl");
     auto teps = [&](double t_ms) { return t_ms > 0 ? mReached / (t_ms * 1e-3) : 0.0; };
-    t.addRow({Cell("CPU Dijkstra (1 thread)"), Cell(fmtMs(cpuMs)), Cell("-"), Cell(fmtCount((u64)cpuEdges)),
+    t.addRow({Cell("CPU Dijkstra (1 thread)"), Cell(fmtMs(cpuMs)), Cell("-"), Cell("-"), Cell(fmtCount((u64)cpuEdges)),
               Cell(fmt("%.2f", cpuEdges / std::max(1.0, mReached))), Cell(fmtTeps(teps(cpuMs))), Cell("1.00x"), Cell("reference")});
     csvS.row({g.name, std::to_string(g.n), std::to_string(g.m), "CPU-Dijkstra", fmt("%.4f", cpuMs), "0",
-              fmt("%.0f", cpuEdges), fmt("%.4f", teps(cpuMs) / 1e6), "1", "REF"});
+              fmt("%.0f", cpuEdges), fmt("%.4f", teps(cpuMs) / 1e6), "1", "REF", "0"});
     double best = 1e300, bestTeps = 0;
     bool pass = true;
     for (size_t i = 0; i < NV; ++i) {
         const double sp = cpuMs / std::max(1e-9, ms[i]);
         std::string iterStr = fmt("%.0f", iters[i]);
         if (vs[i].o.algo == GpuAlgo::DeltaStep) iterStr += " (" + fmt("%.0f", buckets[i]) + "b)";
-        t.addRow({Cell(vs[i].name), Cell(fmtMs(ms[i])), Cell(iterStr), Cell(fmtCount((u64)edges[i])),
+        t.addRow({Cell(vs[i].name), Cell(fmtMs(ms[i])), Cell(iterStr), Cell(fmt("%.0f", syncs[i])), Cell(fmtCount((u64)edges[i])),
                   Cell(fmt("%.2f", edges[i] / std::max(1.0, mReached))), Cell(fmtTeps(teps(ms[i]))),
                   Cell(fmtSpeedup(sp), speedupColor(sp)), verdictCell(vr[i])});
         csvS.row({g.name, std::to_string(g.n), std::to_string(g.m), toString(vs[i].o.algo), fmt("%.4f", ms[i]),
                   fmt("%.1f", iters[i]), fmt("%.0f", edges[i]), fmt("%.4f", teps(ms[i]) / 1e6), fmt("%.4f", sp),
-                  vr[i].pass() ? "PASS" : "FAIL"});
+                  vr[i].pass() ? "PASS" : "FAIL", fmt("%.1f", syncs[i])});
         account(vr[i]);
         pass = pass && vr[i].pass();
         if (ms[i] < best) { best = ms[i]; bestTeps = teps(ms[i]); }
@@ -455,7 +459,7 @@ static void printSummary(const std::vector<SummaryRow>& rows, const Config& c) {
 static void runBenchSizes(const Config& c, const std::vector<std::string>& families, const std::vector<u64>& sizes,
                           std::vector<SummaryRow>& summary) {
     CsvWriter csvS(c.outDir + "/bench_sssp.csv",
-                   {"graph", "n", "m", "method", "time_ms", "iterations", "edges_scanned", "mteps", "speedup", "verify"});
+                   {"graph", "n", "m", "method", "time_ms", "iterations", "edges_scanned", "mteps", "speedup", "verify", "host_syncs"});
     CsvWriter csvA(c.outDir + "/bench_astar.csv",
                    {"graph", "n", "m", "method", "time_ms", "edges_scanned", "speedup_vs_cpu_astar", "verify"});
     for (const auto& fam : families)
@@ -561,6 +565,55 @@ static void runDeltaStudy(const CSRGraph& g, const Config& c, GpuSolver& solver,
         csv.row({g.name, std::to_string(r.d), fmt("%.4f", r.d / std::max(1.0, g.avgW)), fmt("%.4f", r.ms), fmt("%.1f", r.b),
                  fmt("%.1f", r.it), fmt("%.0f", r.ed), fmt("%.4f", r.ed / std::max(1.0, mReached)), r.v.pass() ? "PASS" : "FAIL"});
         account(r.v);
+    }
+    t.print();
+}
+
+// =============================================================================
+// 4b) GIẢM ĐỒNG BỘ HOST-DEVICE: phát S kernel liên tiếp, kernel tự đọc kích thước biên
+// =============================================================================
+static void runSyncStudy(const CSRGraph& g, const Config& c, GpuSolver& solver) {
+    printSection("Host-device synchronization study: " + g.name);
+    CsvWriter csv(c.outDir + "/study_sync_" + g.name + ".csv",
+                  {"graph", "algorithm", "query", "sync_every", "time_ms", "iterations", "launches", "host_syncs",
+                   "speedup_vs_s1", "verify"});
+    std::vector<u32> srcs = pickSources(g, c.queries, c.seed + 17);
+    std::vector<SSSPResult> refs;
+    std::vector<u32> tgts;
+    Rng rng(c.seed + 19);
+    for (u32 s : srcs) {
+        refs.push_back(cpuDijkstra(g, s));
+        tgts.push_back(pickReachableTarget(refs.back().dist, rng, s));
+    }
+    Table t("Kernels launched per host synchronization (S = 1: classic loop, sync after every iteration)");
+    t.setHeader({"Algorithm", "Query", "S", "Time (ms)", "Iterations", "Launches", "Host syncs", "vs S=1", "Verify"}, "llrrrrrrl");
+    struct Cfg { GpuAlgo a; bool astar; };
+    for (Cfg cf : {Cfg{GpuAlgo::Frontier, false}, Cfg{GpuAlgo::DeltaStep, false}, Cfg{GpuAlgo::DeltaStep, true}}) {
+        double base = 0;
+        for (u32 S : {1u, 2u, 4u, 8u, 16u, 32u}) {
+            GpuOptions o = opts(cf.a, c.gpu.mapping, c.gpu.atomic, c.gpu);
+            o.syncEvery = S;
+            if (cf.astar) solver.astar(srcs[0], tgts[0], o); else solver.sssp(srcs[0], o, false);   // warm-up
+            double ms = 0, it = 0, la = 0, sy = 0;
+            VerifyReport v;
+            for (size_t q = 0; q < srcs.size(); ++q) {
+                GpuRunResult r = cf.astar ? solver.astar(srcs[q], tgts[q], o) : solver.sssp(srcs[q], o, true);
+                ms += r.ms; it += r.stats.iterations; la += r.stats.launches; sy += r.stats.hostSyncs;
+                if (cf.astar) v.merge(verifyP2P(g, srcs[q], tgts[q], refs[q].dist[tgts[q]], r.targetDist, r.path));
+                else v.merge(verifySSSP(g, srcs[q], refs[q].dist, r.dist, r.parent, 16, q));
+            }
+            const double Q = (double)srcs.size();
+            ms /= Q; it /= Q; la /= Q; sy /= Q;
+            if (S == 1) base = ms;
+            const double sp = base / std::max(1e-9, ms);
+            t.addRow({Cell(toString(cf.a)), Cell(cf.astar ? "A* p2p" : "SSSP"), Cell(fmtCount(S)), Cell(fmtMs(ms)),
+                      Cell(fmt("%.0f", it)), Cell(fmt("%.0f", la)), Cell(fmt("%.0f", sy)),
+                      Cell(fmtSpeedup(sp), speedupColor(sp)), verdictCell(v)});
+            csv.row({g.name, toString(cf.a), cf.astar ? "astar" : "sssp", std::to_string(S), fmt("%.4f", ms),
+                     fmt("%.1f", it), fmt("%.1f", la), fmt("%.1f", sy), fmt("%.4f", sp), v.pass() ? "PASS" : "FAIL"});
+            account(v);
+        }
+        t.addSeparator();
     }
     t.print();
 }
@@ -781,6 +834,7 @@ int main(int argc, char** argv) {
                 CSRGraph g = makeSynthetic("grid", 1000000, c);
                 GpuSolver s(g, 1);
                 runAtomicStudy(g, c, s);
+                runSyncStudy(g, c, s);
                 runDeltaStudy(g, c, s, !all);
                 if (all) {
                     CsvWriter csv(c.outDir + "/study_mapping.csv", {"graph", "algorithm", "mapping", "time_ms", "speedup_vs_thread", "verify"});
@@ -811,7 +865,7 @@ int main(int argc, char** argv) {
                 printGraphInfo(g);
                 GpuSolver solver(g, 1);
                 CsvWriter csvS(c.outDir + "/bench_sssp_" + g.name + ".csv",
-                               {"graph", "n", "m", "method", "time_ms", "iterations", "edges_scanned", "mteps", "speedup", "verify"});
+                               {"graph", "n", "m", "method", "time_ms", "iterations", "edges_scanned", "mteps", "speedup", "verify", "host_syncs"});
                 CsvWriter csvA(c.outDir + "/bench_astar_" + g.name + ".csv",
                                {"graph", "n", "m", "method", "time_ms", "edges_scanned", "speedup_vs_cpu_astar", "verify"});
                 benchGraph(g, c, solver, csvS, csvA, summary);
@@ -840,6 +894,7 @@ int main(int argc, char** argv) {
             if (m == "verify") runVerify(g, c, solver);
             else if (m == "atomic") runAtomicStudy(g, c, solver);
             else if (m == "delta") runDeltaStudy(g, c, solver, false);
+            else if (m == "sync") runSyncStudy(g, c, solver);
             else if (m == "mapping") {
                 CsvWriter csv(c.outDir + "/study_mapping_" + g.name + ".csv", {"graph", "algorithm", "mapping", "time_ms", "speedup_vs_thread", "verify"});
                 runMappingStudy(g, c, solver, csv);

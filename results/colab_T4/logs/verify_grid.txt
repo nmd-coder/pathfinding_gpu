@@ -1,0 +1,50 @@
+
+  ==========================================================================================
+  ## GPU-Accelerated Parallel Dijkstra / A*  |  CSR + Frontier + Delta-Stepping + Atomics ##
+  ==========================================================================================
+    (generated + CSR built in 192.8 ms)
+  Graph  grid_1000x1000
+    Vertices (n)      : 1000000
+    Directed arcs (m) : 4008120   (avg degree 4.01, max degree 8)
+    Weights           : [51 .. 380], mean 155.9
+    Coordinates       : yes   (admissible h-scale = 0.991796)
+    CSR size          : 34.39 MB  (row_offsets + col_indices + weights)
+    VRAM allocated: 86.4 MB, graph upload: 34.18 ms, auto Delta = 1245
+
+>>> Correctness verification: grid_1000x1000
+
+  Verification matrix (GPU vs CPU std::priority_queue Dijkstra), 5 sources
+  +--------------------------+---------+---------------------+-------------+-------------+-------+--------+-----------+
+  | Test                     | Mapping | Atomic              | Dist checks | Tree checks | Paths | Errors | Result    |
+  +==========================+=========+=====================+=============+=============+=======+========+===========+
+  | SSSP K1 Naive-Relax      | thread  | atomicMin+RBA       |   5,000,000 |   4,999,980 |   320 |      0 | PASS 100% |
+  | SSSP K2 Frontier         | thread  | atomicMin+RBA       |   5,000,000 |   4,999,980 |   320 |      0 | PASS 100% |
+  | SSSP K2 Frontier         | warp    | atomicMin+RBA       |   5,000,000 |   4,999,980 |   320 |      0 | PASS 100% |
+  | SSSP K2 Frontier         | hybrid  | atomicMin+RBA       |   5,000,000 |   4,999,980 |   320 |      0 | PASS 100% |
+  | SSSP K2 Delta-Step       | thread  | atomicMin+RBA       |   5,000,000 |   4,999,980 |   320 |      0 | PASS 100% |
+  | SSSP K2 Delta-Step       | warp    | atomicMin+RBA       |   5,000,000 |   4,999,980 |   320 |      0 | PASS 100% |
+  | SSSP K2 Delta-Step       | hybrid  | atomicMin+RBA       |   5,000,000 |   4,999,980 |   320 |      0 | PASS 100% |
+  | SSSP K1 Naive-Relax      | thread  | atomicCAS+RBA       |   5,000,000 |   4,999,980 |   320 |      0 | PASS 100% |
+  | SSSP K2 Frontier         | hybrid  | atomicCAS+RBA       |   5,000,000 |   4,999,980 |   320 |      0 | PASS 100% |
+  | SSSP K2 Delta-Step       | hybrid  | atomicCAS+RBA       |   5,000,000 |   4,999,980 |   320 |      0 | PASS 100% |
+  | SSSP K1 Naive-Relax      | thread  | atomicMin(no-check) |   5,000,000 |   4,999,980 |   320 |      0 | PASS 100% |
+  | SSSP K2 Frontier         | hybrid  | atomicMin(no-check) |   5,000,000 |   4,999,980 |   320 |      0 | PASS 100% |
+  | SSSP K2 Delta-Step       | hybrid  | atomicMin(no-check) |   5,000,000 |   4,999,980 |   320 |      0 | PASS 100% |
+  +--------------------------+---------+---------------------+-------------+-------------+-------+--------+-----------+
+  | CPU A* (reference check) | -       | -                   |           5 |           0 |     5 |      0 | PASS 100% |
+  | A* Naive-Relax           | thread  | atomicMin+RBA       |           5 |           0 |     5 |      0 | PASS 100% |
+  | A* Frontier              | hybrid  | atomicMin+RBA       |           5 |           0 |     5 |      0 | PASS 100% |
+  | A* Delta-Step            | hybrid  | atomicMin+RBA       |           5 |           0 |     5 |      0 | PASS 100% |
+  | A* Delta-Step            | thread  | atomicCAS+RBA       |           5 |           0 |     5 |      0 | PASS 100% |
+  +--------------------------+---------+---------------------+-------------+-------------+-------+--------+-----------+
+
+  ================================
+  ## FINAL VERIFICATION SUMMARY ##
+  ================================
+  GPU runs verified       : 18
+  Distance comparisons    : 65,000,025
+  Parent-tree checks      : 64,999,740
+  Reconstructed paths     : 4,185
+  Errors                  : 0
+  >>> PASS 100.00% <<<
+

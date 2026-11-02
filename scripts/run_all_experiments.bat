@@ -24,7 +24,9 @@ pathfinder.exe --mode bench --family rmat --sizes 16384,131072,1048576 --queries
 echo [5/8] Atomic contention study
 pathfinder.exe --mode atomic --graph grid --n 1e6 --queries 5
 
-echo [6/8] Delta sweep (grid + rmat)
+echo [6/8] Host-sync study + Delta sweep (grid + rmat)
+pathfinder.exe --mode sync --graph grid --n 1e6 --queries 3
+pathfinder.exe --mode sync --graph rmat --n 1048576 --queries 3
 pathfinder.exe --mode delta --graph grid --n 1e6 --queries 3
 pathfinder.exe --mode delta --graph rmat --n 1048576 --queries 3
 

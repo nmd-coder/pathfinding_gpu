@@ -24,8 +24,8 @@ inline size_t maskWords(size_t bits) { return (bits + 31) / 32; }
 
 // Chuyển tham số runtime -> tham số template của kernel
 template <int SEL, bool ASTAR, bool MARK_R>
-void launchRelaxT(const RelaxCtx& c, AtomicMode am, Mapping mp, int bs, cudaStream_t s) {
-    const u32 grid = divUp(c.inSize, (u32)bs);
+void launchRelaxT(const RelaxCtx& c, AtomicMode am, Mapping mp, int bs, cudaStream_t s, u32 gridOverride) {
+    const u32 grid = gridOverride ? gridOverride : divUp(c.inSize, (u32)bs);
 #define PF_LAUNCH(AMV, MPV) relaxFrontierKernel<SEL, ASTAR, AMV, MPV, MARK_R><<<grid, bs, 0, s>>>(c)
 #define PF_BY_MAP(AMV)                                                   \
     switch (mp) {                                                        \
@@ -88,6 +88,8 @@ struct GpuSolver::Impl {
     cudaEvent_t ev0{}, ev1{};
     double uploadMs = 0.0;
     size_t bytes = 0;
+    int smCount = 1, maxThreadsPerSM = 1024;
+    u32 syncs = 0, launches = 0;   // thống kê của lần chạy hiện tại
 
     template <class T>
     T* dalloc(size_t count) {
@@ -100,6 +102,8 @@ struct GpuSolver::Impl {
     Impl(const CSRGraph& graph, u32 maxBatch) : g(graph), n(graph.n), m(graph.m), K(std::max<u32>(1, maxBatch)) {
         if ((u64)K * n >= 0xFFFFFFFFull) throw std::runtime_error("maxBatch * n must be < 2^32");
         CUDA_CHECK(cudaSetDevice(0));
+        CUDA_CHECK(cudaDeviceGetAttribute(&smCount, cudaDevAttrMultiProcessorCount, 0));
+        CUDA_CHECK(cudaDeviceGetAttribute(&maxThreadsPerSM, cudaDevAttrMaxThreadsPerMultiProcessor, 0));
         // ---- Ước lượng bộ nhớ cần thiết & kiểm tra VRAM còn trống ----
         const size_t Kn = (size_t)K * n;
         size_t need = (size_t)(n + 1) * 4 + (size_t)m * 8 + (size_t)n * 4      // CSR + lightEnd
@@ -164,7 +168,7 @@ struct GpuSolver::Impl {
         d_rMask = dalloc<u32>(maskWords(n));
         d_ctr = dalloc<u32>(C_COUNT);
         d_minKey = dalloc<unsigned long long>(1);
-        d_stats = dalloc<unsigned long long>(4);
+        d_stats = dalloc<unsigned long long>(5);
         d_srcs = dalloc<u32>(K);
         CUDA_CHECK(cudaMallocHost((void**)&h_ctr, C_COUNT * sizeof(u32)));
         CUDA_CHECK(cudaMallocHost((void**)&h_minKey, sizeof(unsigned long long)));
@@ -200,6 +204,12 @@ struct GpuSolver::Impl {
     void readCounters() {
         CUDA_CHECK(cudaMemcpyAsync(h_ctr, d_ctr, C_COUNT * sizeof(u32), cudaMemcpyDeviceToHost, s));
         CUDA_CHECK(cudaStreamSynchronize(s));
+        syncs++;
+    }
+    // Grid cố định cho chế độ phát theo lô: đủ lấp đầy GPU 2 lượt (grid-stride xử lý phần còn lại)
+    u32 persistentGrid(int bs, size_t maxItems) const {
+        u32 g = (u32)std::max(1, smCount * std::max(1, maxThreadsPerSM / bs) * 2);
+        return std::max(1u, std::min<u32>(g, divUp(std::max<size_t>(maxItems, 1), (u32)bs)));
     }
     void zeroCounter(u32 i) { CUDA_CHECK(cudaMemsetAsync(d_ctr + i, 0, sizeof(u32), s)); }
 
@@ -214,17 +224,18 @@ struct GpuSolver::Impl {
         return c;
     }
 
-    void launchRelax(int sel, bool astar, const RelaxCtx& c, const GpuOptions& o) {
-        if (c.inSize == 0) return;
+    void launchRelax(int sel, bool astar, const RelaxCtx& c, const GpuOptions& o, u32 grid = 0) {
+        if (c.inCount == nullptr && c.inSize == 0) return;
+        launches++;
         if (sel == SEL_ALL) {
-            if (astar) launchRelaxT<SEL_ALL, true, false>(c, o.atomic, o.mapping, o.blockSize, s);
-            else       launchRelaxT<SEL_ALL, false, false>(c, o.atomic, o.mapping, o.blockSize, s);
+            if (astar) launchRelaxT<SEL_ALL, true, false>(c, o.atomic, o.mapping, o.blockSize, s, grid);
+            else       launchRelaxT<SEL_ALL, false, false>(c, o.atomic, o.mapping, o.blockSize, s, grid);
         } else if (sel == SEL_LIGHT) {
-            if (astar) launchRelaxT<SEL_LIGHT, true, true>(c, o.atomic, o.mapping, o.blockSize, s);
-            else       launchRelaxT<SEL_LIGHT, false, true>(c, o.atomic, o.mapping, o.blockSize, s);
+            if (astar) launchRelaxT<SEL_LIGHT, true, true>(c, o.atomic, o.mapping, o.blockSize, s, grid);
+            else       launchRelaxT<SEL_LIGHT, false, true>(c, o.atomic, o.mapping, o.blockSize, s, grid);
         } else {
-            if (astar) launchRelaxT<SEL_HEAVY, true, false>(c, o.atomic, o.mapping, o.blockSize, s);
-            else       launchRelaxT<SEL_HEAVY, false, false>(c, o.atomic, o.mapping, o.blockSize, s);
+            if (astar) launchRelaxT<SEL_HEAVY, true, false>(c, o.atomic, o.mapping, o.blockSize, s, grid);
+            else       launchRelaxT<SEL_HEAVY, false, false>(c, o.atomic, o.mapping, o.blockSize, s, grid);
         }
     }
 
@@ -242,6 +253,7 @@ struct GpuSolver::Impl {
             zeroCounter(C_CHANGED);                                   // d_changed = 0
             if (astar) launchNaiveT<true>(c, d_act[cur], d_act[cur ^ 1], d_ctr + C_CHANGED, o.atomic, o.blockSize, s);
             else       launchNaiveT<false>(c, d_act[cur], d_act[cur ^ 1], d_ctr + C_CHANGED, o.atomic, o.blockSize, s);
+            launches++;
             readCounters();
             st.iterations++;
             cur ^= 1;
@@ -259,24 +271,48 @@ struct GpuSolver::Impl {
         CUDA_CHECK(cudaMemsetAsync(d_qMask[1], 0, words * 4, s));
         seedKernel<<<divUp(k, 128), 128, 0, s>>>(d_state, d_srcs, k, n, DevQueue{d_q[0], d_ctr + C_NEAR0, d_qMask[0]}, nullptr);
         CUDA_CHECK_LAUNCH();
+        const u32 S = std::max(1u, o.syncEvery);
+        const u32 grid = persistentGrid(o.blockSize, (size_t)k * n);
+        const u64 cap = (u64)n + 16;
         u32 in = 0, cnt = k;
-        while (cnt > 0) {
-            const u32 out = in ^ 1u;
-            zeroCounter(C_NEAR0 + out);
+        auto makeIter = [&](u32 inIdx) {
+            const u32 out = inIdx ^ 1u;
             RelaxCtx c = makeCtx(astar, dst);
-            c.in = d_q[in];
-            c.inSize = cnt;
-            c.inMask = d_qMask[in];
+            c.in = d_q[inIdx];
+            c.inMask = d_qMask[inIdx];
             c.nearQ = DevQueue{d_q[out], d_ctr + C_NEAR0 + out, d_qMask[out]};
             c.farQ = c.nearQ;          // bound = ~0 => không bao giờ dùng far
             c.rQ = DevQueue{nullptr, nullptr, nullptr};
-            launchRelax(SEL_ALL, astar, c, o);
-            readCounters();
-            cnt = h_ctr[C_NEAR0 + out];
-            in = out;
-            st.iterations++;
-            if (st.iterations > n + 16) throw std::runtime_error("Frontier relaxation did not converge");
+            return c;
+        };
+        while (cnt > 0) {
+            if (S == 1) {
+                // Truyền thống: 1 kernel -> đồng bộ -> Host đọc kích thước F_next
+                const u32 out = in ^ 1u;
+                zeroCounter(C_NEAR0 + out);
+                RelaxCtx c = makeIter(in);
+                c.inSize = cnt;
+                launchRelax(SEL_ALL, astar, c, o);
+                readCounters();
+                cnt = h_ctr[C_NEAR0 + out];
+                in = out;
+            } else {
+                // Theo lô: phát S kernel liên tiếp; kernel tự đọc |F_curr| từ bộ đếm trên GPU.
+                // Khi biên đã rỗng, các kernel còn lại trong lô kết thúc ngay (chi phí vài µs).
+                for (u32 i = 0; i < S; ++i) {
+                    const u32 out = in ^ 1u;
+                    zeroCounter(C_NEAR0 + out);
+                    RelaxCtx c = makeIter(in);
+                    c.inCount = d_ctr + C_NEAR0 + in;
+                    launchRelax(SEL_ALL, astar, c, o, grid);
+                    in = out;
+                }
+                readCounters();
+                cnt = h_ctr[C_NEAR0 + in];
+            }
+            if (launches > cap * S) throw std::runtime_error("Frontier relaxation did not converge");
         }
+        (void)st;
     }
 
     // ------------------------------------------------------------------------
@@ -302,7 +338,9 @@ struct GpuSolver::Impl {
         u32 in = 0, fcur = 0;
         u32 nearCnt = 1, farCnt = 0, rCnt = 0;
         const u32 bs = (u32)o.blockSize;
-        const u64 iterCap = 4ull * n + 1000;
+        const u32 S = std::max(1u, o.syncEvery);
+        const u32 grid = persistentGrid(o.blockSize, n);
+        const u64 iterCap = (4ull * n + 1000) * S;
 
         auto ctxFor = [&](const u32* inData, u32 inSize, u32* inMask, u32 nearIdx) {
             RelaxCtx c = makeCtx(astar, dst);
@@ -321,16 +359,28 @@ struct GpuSolver::Impl {
             while (true) {
                 // Pha nhẹ: lặp tới khi bucket rỗng
                 while (nearCnt > 0) {
-                    const u32 out = in ^ 1u;
-                    zeroCounter(C_NEAR0 + out);
-                    RelaxCtx c = ctxFor(d_q[in], nearCnt, d_qMask[in], out);
-                    launchRelax(SEL_LIGHT, astar, c, o);
+                    if (S == 1) {
+                        const u32 out = in ^ 1u;
+                        zeroCounter(C_NEAR0 + out);
+                        RelaxCtx c = ctxFor(d_q[in], nearCnt, d_qMask[in], out);
+                        launchRelax(SEL_LIGHT, astar, c, o);
+                        in = out;
+                    } else {
+                        // Phát S kernel cạnh nhẹ liên tiếp, kích thước bucket đọc trên GPU
+                        for (u32 i = 0; i < S; ++i) {
+                            const u32 out = in ^ 1u;
+                            zeroCounter(C_NEAR0 + out);
+                            RelaxCtx c = ctxFor(d_q[in], 0, d_qMask[in], out);
+                            c.inCount = d_ctr + C_NEAR0 + in;
+                            launchRelax(SEL_LIGHT, astar, c, o, grid);
+                            in = out;
+                        }
+                    }
                     readCounters();
-                    nearCnt = h_ctr[C_NEAR0 + out];
+                    nearCnt = h_ctr[C_NEAR0 + in];
                     farCnt = h_ctr[C_FAR0 + fcur];
                     rCnt = h_ctr[C_R];
-                    in = out;
-                    if (++st.iterations > iterCap) throw std::runtime_error("Delta-stepping did not converge");
+                    if (launches > iterCap) throw std::runtime_error("Delta-stepping did not converge");
                 }
                 if (rCnt == 0) break;
                 // Pha nặng: nới cạnh nặng của R (xóa bit R khi xử lý)
@@ -341,7 +391,6 @@ struct GpuSolver::Impl {
                 nearCnt = h_ctr[C_NEAR0 + in];   // chỉ khác 0 với A* (khóa có thêm h)
                 farCnt = h_ctr[C_FAR0 + fcur];
                 rCnt = 0;
-                ++st.iterations;
                 if (nearCnt == 0) break;
             }
             st.buckets++;
@@ -387,9 +436,11 @@ struct GpuSolver::Impl {
         if (o.algo == GpuAlgo::DeltaStep) ensureLightEnd(delta);
         r.stats.delta = (o.algo == GpuAlgo::DeltaStep) ? delta : 0;
 
-        CUDA_CHECK(cudaMemsetAsync(d_stats, 0, 4 * sizeof(unsigned long long), s));
+        CUDA_CHECK(cudaMemsetAsync(d_stats, 0, 5 * sizeof(unsigned long long), s));
         CUDA_CHECK(cudaMemsetAsync(d_ctr, 0, C_COUNT * sizeof(u32), s));
         CUDA_CHECK(cudaStreamSynchronize(s));
+        syncs = 0;
+        launches = 0;
 
         CUDA_CHECK(cudaEventRecord(ev0, s));                 // ===== bắt đầu đo =====
         const size_t total = (size_t)k * n;
@@ -417,12 +468,15 @@ struct GpuSolver::Impl {
         CUDA_CHECK(cudaEventElapsedTime(&ms, ev0, ev1));
         r.ms = ms;
 
-        unsigned long long hs[4];
+        unsigned long long hs[5];
         CUDA_CHECK(cudaMemcpy(hs, d_stats, sizeof(hs), cudaMemcpyDeviceToHost));
         r.stats.edgesScanned = hs[0];
         r.stats.atomicsIssued = hs[1];
         r.stats.updates = hs[2];
         r.stats.pushes = hs[3];
+        if (o.algo != GpuAlgo::NaiveRelax) r.stats.iterations = (u32)hs[4];   // đếm trên GPU
+        r.stats.hostSyncs = syncs;
+        r.stats.launches = launches;
 
         if (copyBack || astar) {
             std::vector<u64> st((size_t)k * n);

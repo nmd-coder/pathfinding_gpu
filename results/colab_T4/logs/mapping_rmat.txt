@@ -1,0 +1,38 @@
+
+  ==========================================================================================
+  ## GPU-Accelerated Parallel Dijkstra / A*  |  CSR + Frontier + Delta-Stepping + Atomics ##
+  ==========================================================================================
+    (generated + CSR built in 4169.8 ms)
+  Graph  rmat_s20_ef8
+    Vertices (n)      : 1048576
+    Directed arcs (m) : 16084984   (avg degree 15.34, max degree 39665)
+    Weights           : [1 .. 1000], mean 500.6
+    Coordinates       : no (A* -> h = 0)
+    CSR size          : 126.72 MB  (row_offsets + col_indices + weights)
+    VRAM allocated: 165.2 MB, graph upload: 103.29 ms, auto Delta = 1044
+
+>>> Thread mapping / load balancing: rmat_s20_ef8  (max degree 39,665)
+
+  Thread-per-vertex vs Warp-per-vertex vs Hybrid (CTA/Warp/Thread)
+  +------------+---------+-----------+-----------+-----------+
+  | Algorithm  | Mapping | Time (ms) | vs thread | Verify    |
+  +============+=========+===========+===========+===========+
+  | Frontier   | thread  |     229.4 |     1.00x | PASS 100% |
+  | Frontier   | warp    |     45.60 |     5.03x | PASS 100% |
+  | Frontier   | hybrid  |     35.69 |     6.43x | PASS 100% |
+  +------------+---------+-----------+-----------+-----------+
+  | Delta-Step | thread  |     226.7 |     1.00x | PASS 100% |
+  | Delta-Step | warp    |     46.56 |     4.87x | PASS 100% |
+  | Delta-Step | hybrid  |     37.45 |     6.05x | PASS 100% |
+  +------------+---------+-----------+-----------+-----------+
+
+  ================================
+  ## FINAL VERIFICATION SUMMARY ##
+  ================================
+  GPU runs verified       : 6
+  Distance comparisons    : 18,874,368
+  Parent-tree checks      : 9,816,516
+  Reconstructed paths     : 288
+  Errors                  : 0
+  >>> PASS 100.00% <<<
+

@@ -1,0 +1,52 @@
+
+  ==========================================================================================
+  ## GPU-Accelerated Parallel Dijkstra / A*  |  CSR + Frontier + Delta-Stepping + Atomics ##
+  ==========================================================================================
+    (SNAP loaded + CSR built in 337.5 ms)
+  Graph  roadNet-PA.txt
+    Vertices (n)      : 1090920
+    Directed arcs (m) : 3083796   (avg degree 2.83, max degree 9)
+    Weights           : [1 .. 1000], mean 500.6
+    Coordinates       : no (A* -> h = 0)
+    CSR size          : 27.69 MB  (row_offsets + col_indices + weights)
+
+>>> Benchmark: roadNet-PA.txt  (n = 1,090,920, m = 3,083,796)
+
+  SSSP (single-source shortest path), average of 5 sources | TEPS = reachable arcs / time
+  +-------------------------+-----------+------------+-------+---------------+--------+---------+---------+-----------+
+  | Method                  | Time (ms) |       Iter | Syncs | Edges scanned | Work/m |   MTEPS | Speedup | Verify    |
+  +=========================+===========+============+=======+===============+========+=========+=========+===========+
+  | CPU Dijkstra (1 thread) |     178.7 |          - |     - |     3,083,028 |   1.00 |  17.3 M |   1.00x | reference |
+  | GPU K1 Naive-Relax      |     73.41 |        715 |   715 |   148,279,198 |  48.10 |  42.0 M |   2.43x | PASS 100% |
+  | GPU K2 Frontier         |     64.10 |        717 |    90 |   112,242,227 |  36.41 |  48.1 M |   2.79x | PASS 100% |
+  | GPU K2 Delta-Stepping   |     28.89 | 1165 (44b) |   249 |     5,007,936 |   1.62 | 106.7 M |   6.18x | PASS 100% |
+  +-------------------------+-----------+------------+-------+---------------+--------+---------+---------+-----------+
+
+  Point-to-point A* (admissible Euclidean heuristic), average of 5 queries
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+  | Method                   | Time (ms) | Edges scanned | Work-MTEPS | Speedup vs CPU A* | Verify    |
+  +==========================+===========+===============+============+===================+===========+
+  | CPU Dijkstra early-exit  |     210.5 |             - |          - |             1.01x | reference |
+  | CPU A* (1 thread)        |     211.9 |     3,044,930 |     14.4 M |             1.00x | reference |
+  | GPU A* K1 Naive-Relax    |     75.75 |   146,813,942 |     1.94 G |             2.80x | PASS 100% |
+  | GPU A* K2 Frontier       |     82.13 |   108,983,757 |     1.33 G |             2.58x | PASS 100% |
+  | GPU A* K2 Delta-Stepping |     31.10 |     4,947,635 |    159.1 M |             6.81x | PASS 100% |
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+
+  SUMMARY - speedup of GPU over single-thread CPU vs graph size
+  +----------------+-----------+-----------+--------------+-----------+--------------+-----------+--------------+------------+--------+-------------+------------+--------+
+  | Graph          |         V |         E | CPU Dijkstra | GPU Naive | GPU Frontier | GPU Delta | Best speedup | Best GTEPS | CPU A* | GPU A* best | A* speedup | Verify |
+  +================+===========+===========+==============+===========+==============+===========+==============+============+========+=============+============+========+
+  | roadNet-PA.txt | 1,090,920 | 3,083,796 |        178.7 |     73.41 |        64.10 |     28.89 |        6.18x |      0.107 |  211.9 |       31.10 |      6.81x | PASS   |
+  +----------------+-----------+-----------+--------------+-----------+--------------+-----------+--------------+------------+--------+-------------+------------+--------+
+
+  ================================
+  ## FINAL VERIFICATION SUMMARY ##
+  ================================
+  GPU runs verified       : 6
+  Distance comparisons    : 16,363,815
+  Parent-tree checks      : 16,313,415
+  Reconstructed paths     : 975
+  Errors                  : 0
+  >>> PASS 100.00% <<<
+

@@ -1,0 +1,2 @@
+graph,n,m,cpu_ms,naive_ms,frontier_ms,delta_ms,best_speedup,best_gteps,cpu_astar_ms,gpu_astar_ms,astar_speedup
+roadNet-CA.txt,1971281,5533214,361.8060,131.2774,137.5169,38.0886,9.4991,0.14495,482.0045,39.0961,12.3287

@@ -1,0 +1,259 @@
+
+  ==========================================================================================
+  ## GPU-Accelerated Parallel Dijkstra / A*  |  CSR + Frontier + Delta-Stepping + Atomics ##
+  ==========================================================================================
+
+>>> Building graph: grid, ~10,000 vertices
+    (generated + CSR built in 1.8 ms)
+  Graph  grid_100x100
+    Vertices (n)      : 10000
+    Directed arcs (m) : 39822   (avg degree 3.98, max degree 7)
+    Weights           : [54 .. 359], mean 155.4
+    Coordinates       : yes   (admissible h-scale = 0.995795)
+    CSR size          : 0.34 MB  (row_offsets + col_indices + weights)
+    VRAM allocated: 0.9 MB, graph upload (pinned + 3 streams): 1.70 ms
+
+>>> Benchmark: grid_100x100  (n = 10,000, m = 39,822)
+
+  SSSP (single-source shortest path), average of 5 sources | TEPS = reachable arcs / time
+  +-------------------------+-----------+-----------+-------+---------------+--------+--------+---------+-----------+
+  | Method                  | Time (ms) |      Iter | Syncs | Edges scanned | Work/m |  MTEPS | Speedup | Verify    |
+  +=========================+===========+===========+=======+===============+========+========+=========+===========+
+  | CPU Dijkstra (1 thread) |     0.907 |         - |     - |        39,822 |   1.00 | 43.9 M |   1.00x | reference |
+  | GPU K1 Naive-Relax      |      3.08 |       146 |   146 |       307,377 |   7.72 | 12.9 M |   0.29x | PASS 100% |
+  | GPU K2 Frontier         |      2.39 |       146 |    19 |       307,377 |   7.72 | 16.7 M |   0.38x | PASS 100% |
+  | GPU K2 Delta-Stepping   |      3.50 | 166 (13b) |    52 |        48,741 |   1.22 | 11.4 M |   0.26x | PASS 100% |
+  +-------------------------+-----------+-----------+-------+---------------+--------+--------+---------+-----------+
+
+  Point-to-point A* (admissible Euclidean heuristic), average of 5 queries
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+  | Method                   | Time (ms) | Edges scanned | Work-MTEPS | Speedup vs CPU A* | Verify    |
+  +==========================+===========+===============+============+===================+===========+
+  | CPU Dijkstra early-exit  |      1.06 |             - |          - |             1.02x | reference |
+  | CPU A* (1 thread)        |      1.08 |        26,772 |     24.7 M |             1.00x | reference |
+  | GPU A* K1 Naive-Relax    |      3.22 |       289,396 |     89.8 M |             0.34x | PASS 100% |
+  | GPU A* K2 Frontier       |      2.27 |       289,396 |    127.3 M |             0.48x | PASS 100% |
+  | GPU A* K2 Delta-Stepping |      3.27 |        53,307 |     16.3 M |             0.33x | PASS 100% |
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+
+>>> Building graph: grid, ~30,000 vertices
+    (generated + CSR built in 5.0 ms)
+  Graph  grid_173x173
+    Vertices (n)      : 29929
+    Directed arcs (m) : 119498   (avg degree 3.99, max degree 7)
+    Weights           : [54 .. 361], mean 156.1
+    Coordinates       : yes   (admissible h-scale = 0.994363)
+    CSR size          : 1.03 MB  (row_offsets + col_indices + weights)
+    VRAM allocated: 2.6 MB, graph upload (pinned + 3 streams): 1.84 ms
+
+>>> Benchmark: grid_173x173  (n = 29,929, m = 119,498)
+
+  SSSP (single-source shortest path), average of 5 sources | TEPS = reachable arcs / time
+  +-------------------------+-----------+-----------+-------+---------------+--------+--------+---------+-----------+
+  | Method                  | Time (ms) |      Iter | Syncs | Edges scanned | Work/m |  MTEPS | Speedup | Verify    |
+  +=========================+===========+===========+=======+===============+========+========+=========+===========+
+  | CPU Dijkstra (1 thread) |      3.18 |         - |     - |       119,498 |   1.00 | 37.6 M |   1.00x | reference |
+  | GPU K1 Naive-Relax      |      6.47 |       264 |   264 |     1,845,488 |  15.44 | 18.5 M |   0.49x | PASS 100% |
+  | GPU K2 Frontier         |      4.89 |       264 |    33 |     1,845,429 |  15.44 | 24.5 M |   0.65x | PASS 100% |
+  | GPU K2 Delta-Stepping   |      6.64 | 299 (23b) |    92 |       146,821 |   1.23 | 18.0 M |   0.48x | PASS 100% |
+  +-------------------------+-----------+-----------+-------+---------------+--------+--------+---------+-----------+
+
+  Point-to-point A* (admissible Euclidean heuristic), average of 5 queries
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+  | Method                   | Time (ms) | Edges scanned | Work-MTEPS | Speedup vs CPU A* | Verify    |
+  +==========================+===========+===============+============+===================+===========+
+  | CPU Dijkstra early-exit  |      3.94 |             - |          - |             0.95x | reference |
+  | CPU A* (1 thread)        |      3.73 |        82,422 |     22.1 M |             1.00x | reference |
+  | GPU A* K1 Naive-Relax    |      6.42 |     1,752,723 |    273.0 M |             0.58x | PASS 100% |
+  | GPU A* K2 Frontier       |      4.82 |     1,752,723 |    363.7 M |             0.77x | PASS 100% |
+  | GPU A* K2 Delta-Stepping |      6.35 |       166,372 |     26.2 M |             0.59x | PASS 100% |
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+
+>>> Building graph: grid, ~100,000 vertices
+    (generated + CSR built in 17.3 ms)
+  Graph  grid_316x316
+    Vertices (n)      : 99856
+    Directed arcs (m) : 399762   (avg degree 4.00, max degree 7)
+    Weights           : [53 .. 371], mean 155.9
+    Coordinates       : yes   (admissible h-scale = 0.992845)
+    CSR size          : 3.43 MB  (row_offsets + col_indices + weights)
+    VRAM allocated: 8.6 MB, graph upload (pinned + 3 streams): 3.74 ms
+
+>>> Benchmark: grid_316x316  (n = 99,856, m = 399,762)
+
+  SSSP (single-source shortest path), average of 5 sources | TEPS = reachable arcs / time
+  +-------------------------+-----------+-----------+-------+---------------+--------+--------+---------+-----------+
+  | Method                  | Time (ms) |      Iter | Syncs | Edges scanned | Work/m |  MTEPS | Speedup | Verify    |
+  +=========================+===========+===========+=======+===============+========+========+=========+===========+
+  | CPU Dijkstra (1 thread) |     11.90 |         - |     - |       399,762 |   1.00 | 33.6 M |   1.00x | reference |
+  | GPU K1 Naive-Relax      |     14.53 |       493 |   493 |    10,878,509 |  27.21 | 27.5 M |   0.82x | PASS 100% |
+  | GPU K2 Frontier         |     10.53 |       493 |    62 |    10,932,553 |  27.35 | 38.0 M |   1.13x | PASS 100% |
+  | GPU K2 Delta-Stepping   |     14.42 | 564 (44b) |   174 |       486,872 |   1.22 | 27.7 M |   0.83x | PASS 100% |
+  +-------------------------+-----------+-----------+-------+---------------+--------+--------+---------+-----------+
+
+  Point-to-point A* (admissible Euclidean heuristic), average of 5 queries
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+  | Method                   | Time (ms) | Edges scanned | Work-MTEPS | Speedup vs CPU A* | Verify    |
+  +==========================+===========+===============+============+===================+===========+
+  | CPU Dijkstra early-exit  |     15.70 |             - |          - |             1.14x | reference |
+  | CPU A* (1 thread)        |     17.86 |       323,522 |     18.1 M |             1.00x | reference |
+  | GPU A* K1 Naive-Relax    |     14.64 |    10,606,266 |    724.7 M |             1.22x | PASS 100% |
+  | GPU A* K2 Frontier       |     11.34 |    10,655,184 |    939.5 M |             1.57x | PASS 100% |
+  | GPU A* K2 Delta-Stepping |     15.03 |       637,414 |     42.4 M |             1.19x | PASS 100% |
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+
+>>> Building graph: grid, ~300,000 vertices
+    (generated + CSR built in 57.8 ms)
+  Graph  grid_548x548
+    Vertices (n)      : 300304
+    Directed arcs (m) : 1203734   (avg degree 4.01, max degree 8)
+    Weights           : [52 .. 377], mean 155.9
+    Coordinates       : yes   (admissible h-scale = 0.993594)
+    CSR size          : 10.33 MB  (row_offsets + col_indices + weights)
+    VRAM allocated: 25.9 MB, graph upload (pinned + 3 streams): 10.54 ms
+
+>>> Benchmark: grid_548x548  (n = 300,304, m = 1,203,734)
+
+  SSSP (single-source shortest path), average of 5 sources | TEPS = reachable arcs / time
+  +-------------------------+-----------+-----------+-------+---------------+--------+--------+---------+-----------+
+  | Method                  | Time (ms) |      Iter | Syncs | Edges scanned | Work/m |  MTEPS | Speedup | Verify    |
+  +=========================+===========+===========+=======+===============+========+========+=========+===========+
+  | CPU Dijkstra (1 thread) |     44.39 |         - |     - |     1,203,734 |   1.00 | 27.1 M |   1.00x | reference |
+  | GPU K1 Naive-Relax      |     29.80 |       770 |   770 |    54,820,383 |  45.54 | 40.4 M |   1.49x | PASS 100% |
+  | GPU K2 Frontier         |     21.80 |       770 |    97 |    53,670,689 |  44.59 | 55.2 M |   2.04x | PASS 100% |
+  | GPU K2 Delta-Stepping   |     23.98 | 883 (68b) |   270 |     1,476,590 |   1.23 | 50.2 M |   1.85x | PASS 100% |
+  +-------------------------+-----------+-----------+-------+---------------+--------+--------+---------+-----------+
+
+  Point-to-point A* (admissible Euclidean heuristic), average of 5 queries
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+  | Method                   | Time (ms) | Edges scanned | Work-MTEPS | Speedup vs CPU A* | Verify    |
+  +==========================+===========+===============+============+===================+===========+
+  | CPU Dijkstra early-exit  |     51.60 |             - |          - |             0.86x | reference |
+  | CPU A* (1 thread)        |     44.36 |       727,698 |     16.4 M |             1.00x | reference |
+  | GPU A* K1 Naive-Relax    |     28.13 |    50,678,991 |     1.80 G |             1.58x | PASS 100% |
+  | GPU A* K2 Frontier       |     21.93 |    47,553,490 |     2.17 G |             2.02x | PASS 100% |
+  | GPU A* K2 Delta-Stepping |     25.32 |     1,459,797 |     57.7 M |             1.75x | PASS 100% |
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+
+>>> Building graph: grid, ~1,000,000 vertices
+    (generated + CSR built in 189.2 ms)
+  Graph  grid_1000x1000
+    Vertices (n)      : 1000000
+    Directed arcs (m) : 4008120   (avg degree 4.01, max degree 8)
+    Weights           : [51 .. 380], mean 155.9
+    Coordinates       : yes   (admissible h-scale = 0.991796)
+    CSR size          : 34.39 MB  (row_offsets + col_indices + weights)
+    VRAM allocated: 86.4 MB, graph upload (pinned + 3 streams): 34.30 ms
+
+>>> Benchmark: grid_1000x1000  (n = 1,000,000, m = 4,008,120)
+
+  SSSP (single-source shortest path), average of 5 sources | TEPS = reachable arcs / time
+  +-------------------------+-----------+-------------+-------+---------------+--------+--------+---------+-----------+
+  | Method                  | Time (ms) |        Iter | Syncs | Edges scanned | Work/m |  MTEPS | Speedup | Verify    |
+  +=========================+===========+=============+=======+===============+========+========+=========+===========+
+  | CPU Dijkstra (1 thread) |     187.1 |           - |     - |     4,008,120 |   1.00 | 21.4 M |   1.00x | reference |
+  | GPU K1 Naive-Relax      |     122.8 |        1494 |  1494 |   348,458,482 |  86.94 | 32.7 M |   1.52x | PASS 100% |
+  | GPU K2 Frontier         |     107.9 |        1494 |   187 |   277,622,923 |  69.27 | 37.2 M |   1.73x | PASS 100% |
+  | GPU K2 Delta-Stepping   |     50.20 | 1717 (131b) |   524 |     4,910,470 |   1.23 | 79.8 M |   3.73x | PASS 100% |
+  +-------------------------+-----------+-------------+-------+---------------+--------+--------+---------+-----------+
+
+  Point-to-point A* (admissible Euclidean heuristic), average of 5 queries
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+  | Method                   | Time (ms) | Edges scanned | Work-MTEPS | Speedup vs CPU A* | Verify    |
+  +==========================+===========+===============+============+===================+===========+
+  | CPU Dijkstra early-exit  |     230.9 |             - |          - |             0.95x | reference |
+  | CPU A* (1 thread)        |     219.1 |     2,585,458 |     11.8 M |             1.00x | reference |
+  | GPU A* K1 Naive-Relax    |     114.1 |   313,920,472 |     2.75 G |             1.92x | PASS 100% |
+  | GPU A* K2 Frontier       |     127.7 |   245,399,437 |     1.92 G |             1.72x | PASS 100% |
+  | GPU A* K2 Delta-Stepping |     54.91 |     5,123,192 |     93.3 M |             3.99x | PASS 100% |
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+
+>>> Building graph: grid, ~2,000,000 vertices
+    (generated + CSR built in 562.3 ms)
+  Graph  grid_1414x1414
+    Vertices (n)      : 1999396
+    Directed arcs (m) : 8017360   (avg degree 4.01, max degree 8)
+    Weights           : [51 .. 389], mean 156.0
+    Coordinates       : yes   (admissible h-scale = 0.992937)
+    CSR size          : 68.79 MB  (row_offsets + col_indices + weights)
+    VRAM allocated: 172.7 MB, graph upload (pinned + 3 streams): 83.58 ms
+
+>>> Benchmark: grid_1414x1414  (n = 1,999,396, m = 8,017,360)
+
+  SSSP (single-source shortest path), average of 5 sources | TEPS = reachable arcs / time
+  +-------------------------+-----------+-------------+-------+---------------+--------+---------+---------+-----------+
+  | Method                  | Time (ms) |        Iter | Syncs | Edges scanned | Work/m |   MTEPS | Speedup | Verify    |
+  +=========================+===========+=============+=======+===============+========+=========+=========+===========+
+  | CPU Dijkstra (1 thread) |     423.9 |           - |     - |     8,017,360 |   1.00 |  18.9 M |   1.00x | reference |
+  | GPU K1 Naive-Relax      |     355.8 |        2333 |  2333 | 1,134,996,737 | 141.57 |  22.5 M |   1.19x | PASS 100% |
+  | GPU K2 Frontier         |     455.1 |        2333 |   292 |   596,111,164 |  74.35 |  17.6 M |   0.93x | PASS 100% |
+  | GPU K2 Delta-Stepping   |     76.86 | 2688 (204b) |   816 |     9,820,272 |   1.22 | 104.3 M |   5.52x | PASS 100% |
+  +-------------------------+-----------+-------------+-------+---------------+--------+---------+---------+-----------+
+
+  Point-to-point A* (admissible Euclidean heuristic), average of 5 queries
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+  | Method                   | Time (ms) | Edges scanned | Work-MTEPS | Speedup vs CPU A* | Verify    |
+  +==========================+===========+===============+============+===================+===========+
+  | CPU Dijkstra early-exit  |     528.5 |             - |          - |             1.14x | reference |
+  | CPU A* (1 thread)        |     602.5 |     6,390,557 |     10.6 M |             1.00x | reference |
+  | GPU A* K1 Naive-Relax    |     350.4 | 1,082,242,150 |     3.09 G |             1.72x | PASS 100% |
+  | GPU A* K2 Frontier       |     580.3 |   553,264,325 |    953.4 M |             1.04x | PASS 100% |
+  | GPU A* K2 Delta-Stepping |     93.62 |    12,927,576 |    138.1 M |             6.44x | PASS 100% |
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+
+>>> Building graph: grid, ~4,000,000 vertices
+    (generated + CSR built in 800.0 ms)
+  Graph  grid_2000x2000
+    Vertices (n)      : 4000000
+    Directed arcs (m) : 16041488   (avg degree 4.01, max degree 8)
+    Weights           : [51 .. 393], mean 156.0
+    Coordinates       : yes   (admissible h-scale = 0.992209)
+    CSR size          : 137.65 MB  (row_offsets + col_indices + weights)
+    VRAM allocated: 345.5 MB, graph upload (pinned + 3 streams): 138.12 ms
+
+>>> Benchmark: grid_2000x2000  (n = 4,000,000, m = 16,041,488)
+
+  SSSP (single-source shortest path), average of 5 sources | TEPS = reachable arcs / time
+  +-------------------------+-----------+-------------+-------+---------------+--------+---------+---------+-----------+
+  | Method                  | Time (ms) |        Iter | Syncs | Edges scanned | Work/m |   MTEPS | Speedup | Verify    |
+  +=========================+===========+=============+=======+===============+========+=========+=========+===========+
+  | CPU Dijkstra (1 thread) |     920.8 |           - |     - |    16,041,488 |   1.00 |  17.4 M |   1.00x | reference |
+  | GPU K1 Naive-Relax      |     862.9 |        2980 |  2980 | 2,836,362,978 | 176.81 |  18.6 M |   1.07x | PASS 100% |
+  | GPU K2 Frontier         |    1598.0 |        2978 |   373 | 1,219,272,976 |  76.01 |  10.0 M |   0.58x | PASS 100% |
+  | GPU K2 Delta-Stepping   |     105.2 | 3455 (261b) |  1043 |    19,650,623 |   1.22 | 152.5 M |   8.76x | PASS 100% |
+  +-------------------------+-----------+-------------+-------+---------------+--------+---------+---------+-----------+
+
+  Point-to-point A* (admissible Euclidean heuristic), average of 5 queries
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+  | Method                   | Time (ms) | Edges scanned | Work-MTEPS | Speedup vs CPU A* | Verify    |
+  +==========================+===========+===============+============+===================+===========+
+  | CPU Dijkstra early-exit  |    1161.2 |             - |          - |             1.09x | reference |
+  | CPU A* (1 thread)        |    1269.0 |    11,393,442 |      9.0 M |             1.00x | reference |
+  | GPU A* K1 Naive-Relax    |     976.9 | 2,690,359,709 |     2.75 G |             1.30x | PASS 100% |
+  | GPU A* K2 Frontier       |    2012.2 | 1,136,545,068 |    564.8 M |             0.63x | PASS 100% |
+  | GPU A* K2 Delta-Stepping |     129.3 |    22,722,650 |    175.8 M |             9.82x | PASS 100% |
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+
+  SUMMARY - speedup of GPU over single-thread CPU vs graph size
+  +----------------+-----------+------------+--------------+-----------+--------------+-----------+--------------+------------+--------+-------------+------------+--------+
+  | Graph          |         V |          E | CPU Dijkstra | GPU Naive | GPU Frontier | GPU Delta | Best speedup | Best GTEPS | CPU A* | GPU A* best | A* speedup | Verify |
+  +================+===========+============+==============+===========+==============+===========+==============+============+========+=============+============+========+
+  | grid_100x100   |    10,000 |     39,822 |        0.907 |      3.08 |         2.39 |      3.50 |        0.38x |      0.017 |   1.08 |        2.27 |      0.48x | PASS   |
+  | grid_173x173   |    29,929 |    119,498 |         3.18 |      6.47 |         4.89 |      6.64 |        0.65x |      0.024 |   3.73 |        4.82 |      0.77x | PASS   |
+  | grid_316x316   |    99,856 |    399,762 |        11.90 |     14.53 |        10.53 |     14.42 |        1.13x |      0.038 |  17.86 |       11.34 |      1.57x | PASS   |
+  | grid_548x548   |   300,304 |  1,203,734 |        44.39 |     29.80 |        21.80 |     23.98 |        2.04x |      0.055 |  44.36 |       21.93 |      2.02x | PASS   |
+  | grid_1000x1000 | 1,000,000 |  4,008,120 |        187.1 |     122.8 |        107.9 |     50.20 |        3.73x |      0.080 |  219.1 |       54.91 |      3.99x | PASS   |
+  | grid_1414x1414 | 1,999,396 |  8,017,360 |        423.9 |     355.8 |        455.1 |     76.86 |        5.52x |      0.104 |  602.5 |       93.62 |      6.44x | PASS   |
+  | grid_2000x2000 | 4,000,000 | 16,041,488 |        920.8 |     862.9 |       1598.0 |     105.2 |        8.76x |      0.153 | 1269.0 |       129.3 |      9.82x | PASS   |
+  +----------------+-----------+------------+--------------+-----------+--------------+-----------+--------------+------------+--------+-------------+------------+--------+
+
+  ================================
+  ## FINAL VERIFICATION SUMMARY ##
+  ================================
+  GPU runs verified       : 42
+  Distance comparisons    : 111,592,380
+  Parent-tree checks      : 111,591,660
+  Reconstructed paths     : 6,825
+  Errors                  : 0
+  >>> PASS 100.00% <<<
+

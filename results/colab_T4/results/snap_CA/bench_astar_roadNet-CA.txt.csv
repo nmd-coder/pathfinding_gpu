@@ -1,0 +1,6 @@
+graph,n,m,method,time_ms,edges_scanned,speedup_vs_cpu_astar,verify
+roadNet-CA.txt,1971281,5533214,CPU-Dijkstra-early-exit,463.5001,-,-,REF
+roadNet-CA.txt,1971281,5533214,CPU-AStar,482.0045,5441582,1,REF
+roadNet-CA.txt,1971281,5533214,AStar-Naive-Relax,135.5792,200747870,3.5551,PASS
+roadNet-CA.txt,1971281,5533214,AStar-Frontier,178.6002,154297943,2.6988,PASS
+roadNet-CA.txt,1971281,5533214,AStar-Delta-Step,39.0961,8692453,12.3287,PASS

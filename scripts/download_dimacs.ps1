@@ -22,7 +22,17 @@ foreach ($ext in @("gr", "co")) {
     $outPath = Join-Path $dir $name
     if (Test-Path $outPath) { Write-Host "Exists: $outPath"; continue }
     Write-Host "Downloading $base/$name.gz ..."
-    Invoke-WebRequest -Uri "$base/$name.gz" -OutFile $gzPath
+    try { Invoke-WebRequest -Uri "$base/$name.gz" -OutFile $gzPath -TimeoutSec 60 }
+    catch {
+        Write-Host "DIMACS server unreachable -> downloading SNAP roadNet-PA instead"
+        $snap = Join-Path $dir "roadNet-PA.txt"
+        if (-not (Test-Path $snap)) {
+            Invoke-WebRequest -Uri "https://snap.stanford.edu/data/roadNet-PA.txt.gz" -OutFile "$snap.gz" -TimeoutSec 300
+            Expand-Gz "$snap.gz" $snap; Remove-Item "$snap.gz"
+        }
+        Write-Host "Run:  pathfinder.exe --mode bench --graph snap --file data\roadNet-PA.txt --directed --queries 5"
+        exit 0
+    }
     Expand-Gz $gzPath $outPath
     Remove-Item $gzPath
     Write-Host "OK: $outPath"

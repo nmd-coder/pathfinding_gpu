@@ -38,6 +38,9 @@ struct GpuOptions {
     AtomicMode atomic = AtomicMode::MinRBA;
     u32 delta = 0;          // 0 => tự chọn: Delta = 32 * avgW / avgDeg  (Davidson et al. 2014)
     int blockSize = 256;
+    // Số kernel nới lỏng phát liên tiếp giữa 2 lần đồng bộ Host-Device (Frontier / Delta).
+    // 1 = đồng bộ sau mỗi vòng (cách truyền thống). >1: kernel tự đọc kích thước biên trên GPU.
+    u32 syncEvery = 8;
 };
 
 // Bộ đếm thống kê thu từ kernel (gom theo warp rồi mới atomicAdd -> chi phí không đáng kể)
@@ -46,7 +49,9 @@ struct GpuStats {
     u64 atomicsIssued = 0;      // số lệnh atomic cập nhật khoảng cách đã phát ra
     u64 updates = 0;            // số lần khoảng cách thực sự giảm
     u64 pushes = 0;             // số lần đưa đỉnh vào hàng đợi biên
-    u32 iterations = 0;         // số lần khởi chạy kernel nới lỏng (bước đồng bộ)
+    u32 iterations = 0;         // số vòng nới lỏng có việc (biên khác rỗng)
+    u32 hostSyncs = 0;          // số lần Host phải chờ GPU (cudaStreamSynchronize) trong vòng lặp
+    u32 launches = 0;           // số kernel nới lỏng đã phát (kể cả kernel rỗng khi chạy theo lô)
     u32 buckets = 0;            // số bucket đã xử lý (Delta-Stepping)
     u32 delta = 0;              // Delta thực tế đã dùng
 };

@@ -1,0 +1,22 @@
+
+  ==========================================================================================
+  ## GPU-Accelerated Parallel Dijkstra / A*  |  CSR + Frontier + Delta-Stepping + Atomics ##
+  ==========================================================================================
+
+>>> Hardware / software environment
+  +-----------------------------+---------------------------------------------------+
+  | Item                        | Value                                             |
+  +=============================+===================================================+
+  | GPU                         | Tesla T4                                          |
+  | Compute capability          | 7.5                                               |
+  | SMs / max threads per SM    | 40 / 1024                                         |
+  | Core clock                  | 1590 MHz                                          |
+  | Global memory (VRAM)        | 14.56 GB                                          |
+  | L2 cache / shared per block | 4.0 MB / 48 KB                                    |
+  | Memory bus / peak bandwidth | 256-bit / 320.1 GB/s                              |
+  | CUDA driver / runtime       | 13.0 / 13.0                                       |
+  | CPU hardware threads        | 2                                                 |
+  | OpenMP threads              | 2                                                 |
+  | Host compiler               | GCC 13.3.0                                        |
+  | Timing                      | GPU: cudaEvent_t | CPU: std::chrono::steady_clock |
+  +-----------------------------+---------------------------------------------------+

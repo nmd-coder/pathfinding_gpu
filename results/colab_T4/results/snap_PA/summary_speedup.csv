@@ -1,0 +1,2 @@
+graph,n,m,cpu_ms,naive_ms,frontier_ms,delta_ms,best_speedup,best_gteps,cpu_astar_ms,gpu_astar_ms,astar_speedup
+roadNet-PA.txt,1090920,3083796,178.6750,73.4129,64.0994,28.8904,6.1846,0.10671,211.9150,31.1034,6.8132

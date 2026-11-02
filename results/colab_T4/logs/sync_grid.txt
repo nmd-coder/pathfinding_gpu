@@ -1,0 +1,51 @@
+
+  ==========================================================================================
+  ## GPU-Accelerated Parallel Dijkstra / A*  |  CSR + Frontier + Delta-Stepping + Atomics ##
+  ==========================================================================================
+    (generated + CSR built in 199.1 ms)
+  Graph  grid_1000x1000
+    Vertices (n)      : 1000000
+    Directed arcs (m) : 4008120   (avg degree 4.01, max degree 8)
+    Weights           : [51 .. 380], mean 155.9
+    Coordinates       : yes   (admissible h-scale = 0.991796)
+    CSR size          : 34.39 MB  (row_offsets + col_indices + weights)
+    VRAM allocated: 86.4 MB, graph upload: 33.53 ms, auto Delta = 1245
+
+>>> Host-device synchronization study: grid_1000x1000
+
+  Kernels launched per host synchronization (S = 1: classic loop, sync after every iteration)
+  +------------+--------+----+-----------+------------+----------+------------+--------+-----------+
+  | Algorithm  | Query  |  S | Time (ms) | Iterations | Launches | Host syncs | vs S=1 | Verify    |
+  +============+========+====+===========+============+==========+============+========+===========+
+  | Frontier   | SSSP   |  1 |     127.3 |       1482 |     1482 |       1482 |  1.00x | PASS 100% |
+  | Frontier   | SSSP   |  2 |     123.3 |       1482 |     1483 |        741 |  1.03x | PASS 100% |
+  | Frontier   | SSSP   |  4 |     113.7 |       1482 |     1484 |        371 |  1.12x | PASS 100% |
+  | Frontier   | SSSP   |  8 |     114.9 |       1482 |     1485 |        186 |  1.11x | PASS 100% |
+  | Frontier   | SSSP   | 16 |     112.6 |       1482 |     1493 |         93 |  1.13x | PASS 100% |
+  | Frontier   | SSSP   | 32 |     111.4 |       1482 |     1493 |         47 |  1.14x | PASS 100% |
+  +------------+--------+----+-----------+------------+----------+------------+--------+-----------+
+  | Delta-Step | SSSP   |  1 |     55.86 |       1701 |     1701 |       1830 |  1.00x | PASS 100% |
+  | Delta-Step | SSSP   |  2 |     50.83 |       1701 |     1723 |       1055 |  1.10x | PASS 100% |
+  | Delta-Step | SSSP   |  4 |     45.92 |       1701 |     1766 |        667 |  1.22x | PASS 100% |
+  | Delta-Step | SSSP   |  8 |     47.26 |       1701 |     2199 |        517 |  1.18x | PASS 100% |
+  | Delta-Step | SSSP   | 16 |     45.50 |       1701 |     2204 |        388 |  1.23x | PASS 100% |
+  | Delta-Step | SSSP   | 32 |     59.13 |       1701 |     4279 |        388 |  0.94x | PASS 100% |
+  +------------+--------+----+-----------+------------+----------+------------+--------+-----------+
+  | Delta-Step | A* p2p |  1 |     74.67 |       2319 |     2319 |       2360 |  1.00x | PASS 100% |
+  | Delta-Step | A* p2p |  2 |     63.38 |       2319 |     2340 |       1232 |  1.18x | PASS 100% |
+  | Delta-Step | A* p2p |  4 |     56.33 |       2319 |     2384 |        668 |  1.33x | PASS 100% |
+  | Delta-Step | A* p2p |  8 |     53.37 |       2319 |     2476 |        387 |  1.40x | PASS 100% |
+  | Delta-Step | A* p2p | 16 |     53.40 |       2319 |     2692 |        248 |  1.40x | PASS 100% |
+  | Delta-Step | A* p2p | 32 |     54.60 |       2319 |     3018 |        175 |  1.37x | PASS 100% |
+  +------------+--------+----+-----------+------------+----------+------------+--------+-----------+
+
+  ================================
+  ## FINAL VERIFICATION SUMMARY ##
+  ================================
+  GPU runs verified       : 18
+  Distance comparisons    : 36,000,018
+  Parent-tree checks      : 35,999,856
+  Reconstructed paths     : 594
+  Errors                  : 0
+  >>> PASS 100.00% <<<
+

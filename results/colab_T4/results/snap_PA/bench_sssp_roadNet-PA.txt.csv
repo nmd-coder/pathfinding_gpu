@@ -1,0 +1,5 @@
+graph,n,m,method,time_ms,iterations,edges_scanned,mteps,speedup,verify,host_syncs
+roadNet-PA.txt,1090920,3083796,CPU-Dijkstra,178.6750,0,3083028,17.2549,1,REF,0
+roadNet-PA.txt,1090920,3083796,Naive-Relax,73.4129,715.0,148279199,41.9957,2.4338,PASS,715.0
+roadNet-PA.txt,1090920,3083796,Frontier,64.0994,716.6,112242227,48.0976,2.7875,PASS,90.2
+roadNet-PA.txt,1090920,3083796,Delta-Step,28.8904,1165.0,5007937,106.7146,6.1846,PASS,248.8

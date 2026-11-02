@@ -1,0 +1,294 @@
+
+  ==========================================================================================
+  ## GPU-Accelerated Parallel Dijkstra / A*  |  CSR + Frontier + Delta-Stepping + Atomics ##
+  ==========================================================================================
+
+>>> Hardware / software environment
+  +-----------------------------+---------------------------------------------------+
+  | Item                        | Value                                             |
+  +=============================+===================================================+
+  | GPU                         | Tesla T4                                          |
+  | Compute capability          | 7.5                                               |
+  | SMs / max threads per SM    | 40 / 1024                                         |
+  | Core clock                  | 1590 MHz                                          |
+  | Global memory (VRAM)        | 14.56 GB                                          |
+  | L2 cache / shared per block | 4.0 MB / 48 KB                                    |
+  | Memory bus / peak bandwidth | 256-bit / 320.1 GB/s                              |
+  | CUDA driver / runtime       | 13.0 / 13.0                                       |
+  | CPU hardware threads        | 2                                                 |
+  | OpenMP threads              | 2                                                 |
+  | Host compiler               | GCC 13.3.0                                        |
+  | Timing                      | GPU: cudaEvent_t | CPU: std::chrono::steady_clock |
+  +-----------------------------+---------------------------------------------------+
+    (generated + CSR built in 18.8 ms)
+  Graph  grid_316x316
+    Vertices (n)      : 99856
+    Directed arcs (m) : 399762   (avg degree 4.00, max degree 7)
+    Weights           : [53 .. 371], mean 155.9
+    Coordinates       : yes   (admissible h-scale = 0.992845)
+    CSR size          : 3.43 MB  (row_offsets + col_indices + weights)
+
+>>> Correctness verification: grid_316x316
+
+  Verification matrix (GPU vs CPU std::priority_queue Dijkstra), 3 sources
+  +--------------------------+---------+---------------------+-------------+-------------+-------+--------+-----------+
+  | Test                     | Mapping | Atomic              | Dist checks | Tree checks | Paths | Errors | Result    |
+  +==========================+=========+=====================+=============+=============+=======+========+===========+
+  | SSSP K1 Naive-Relax      | thread  | atomicMin+RBA       |     299,568 |     299,562 |   192 |      0 | PASS 100% |
+  | SSSP K2 Frontier         | thread  | atomicMin+RBA       |     299,568 |     299,562 |   192 |      0 | PASS 100% |
+  | SSSP K2 Frontier         | warp    | atomicMin+RBA       |     299,568 |     299,562 |   192 |      0 | PASS 100% |
+  | SSSP K2 Frontier         | hybrid  | atomicMin+RBA       |     299,568 |     299,562 |   192 |      0 | PASS 100% |
+  | SSSP K2 Delta-Step       | thread  | atomicMin+RBA       |     299,568 |     299,562 |   192 |      0 | PASS 100% |
+  | SSSP K2 Delta-Step       | warp    | atomicMin+RBA       |     299,568 |     299,562 |   192 |      0 | PASS 100% |
+  | SSSP K2 Delta-Step       | hybrid  | atomicMin+RBA       |     299,568 |     299,562 |   192 |      0 | PASS 100% |
+  | SSSP K1 Naive-Relax      | thread  | atomicCAS+RBA       |     299,568 |     299,562 |   192 |      0 | PASS 100% |
+  | SSSP K2 Frontier         | hybrid  | atomicCAS+RBA       |     299,568 |     299,562 |   192 |      0 | PASS 100% |
+  | SSSP K2 Delta-Step       | hybrid  | atomicCAS+RBA       |     299,568 |     299,562 |   192 |      0 | PASS 100% |
+  | SSSP K1 Naive-Relax      | thread  | atomicMin(no-check) |     299,568 |     299,562 |   192 |      0 | PASS 100% |
+  | SSSP K2 Frontier         | hybrid  | atomicMin(no-check) |     299,568 |     299,562 |   192 |      0 | PASS 100% |
+  | SSSP K2 Delta-Step       | hybrid  | atomicMin(no-check) |     299,568 |     299,562 |   192 |      0 | PASS 100% |
+  +--------------------------+---------+---------------------+-------------+-------------+-------+--------+-----------+
+  | CPU A* (reference check) | -       | -                   |           3 |           0 |     3 |      0 | PASS 100% |
+  | A* Naive-Relax           | thread  | atomicMin+RBA       |           3 |           0 |     3 |      0 | PASS 100% |
+  | A* Frontier              | hybrid  | atomicMin+RBA       |           3 |           0 |     3 |      0 | PASS 100% |
+  | A* Delta-Step            | hybrid  | atomicMin+RBA       |           3 |           0 |     3 |      0 | PASS 100% |
+  | A* Delta-Step            | thread  | atomicCAS+RBA       |           3 |           0 |     3 |      0 | PASS 100% |
+  +--------------------------+---------+---------------------+-------------+-------------+-------+--------+-----------+
+    (generated + CSR built in 86.3 ms)
+  Graph  rmat_s15_ef8
+    Vertices (n)      : 32768
+    Directed arcs (m) : 467648   (avg degree 14.27, max degree 3839)
+    Weights           : [1 .. 1000], mean 501.0
+    Coordinates       : no (A* -> h = 0)
+    CSR size          : 3.69 MB  (row_offsets + col_indices + weights)
+
+>>> Correctness verification: rmat_s15_ef8
+
+  Verification matrix (GPU vs CPU std::priority_queue Dijkstra), 3 sources
+  +--------------------------+---------+---------------------+-------------+-------------+-------+--------+-----------+
+  | Test                     | Mapping | Atomic              | Dist checks | Tree checks | Paths | Errors | Result    |
+  +==========================+=========+=====================+=============+=============+=======+========+===========+
+  | SSSP K1 Naive-Relax      | thread  | atomicMin+RBA       |      98,304 |      63,036 |   192 |      0 | PASS 100% |
+  | SSSP K2 Frontier         | thread  | atomicMin+RBA       |      98,304 |      63,036 |   192 |      0 | PASS 100% |
+  | SSSP K2 Frontier         | warp    | atomicMin+RBA       |      98,304 |      63,036 |   192 |      0 | PASS 100% |
+  | SSSP K2 Frontier         | hybrid  | atomicMin+RBA       |      98,304 |      63,036 |   192 |      0 | PASS 100% |
+  | SSSP K2 Delta-Step       | thread  | atomicMin+RBA       |      98,304 |      63,036 |   192 |      0 | PASS 100% |
+  | SSSP K2 Delta-Step       | warp    | atomicMin+RBA       |      98,304 |      63,036 |   192 |      0 | PASS 100% |
+  | SSSP K2 Delta-Step       | hybrid  | atomicMin+RBA       |      98,304 |      63,036 |   192 |      0 | PASS 100% |
+  | SSSP K1 Naive-Relax      | thread  | atomicCAS+RBA       |      98,304 |      63,036 |   192 |      0 | PASS 100% |
+  | SSSP K2 Frontier         | hybrid  | atomicCAS+RBA       |      98,304 |      63,036 |   192 |      0 | PASS 100% |
+  | SSSP K2 Delta-Step       | hybrid  | atomicCAS+RBA       |      98,304 |      63,036 |   192 |      0 | PASS 100% |
+  | SSSP K1 Naive-Relax      | thread  | atomicMin(no-check) |      98,304 |      63,036 |   192 |      0 | PASS 100% |
+  | SSSP K2 Frontier         | hybrid  | atomicMin(no-check) |      98,304 |      63,036 |   192 |      0 | PASS 100% |
+  | SSSP K2 Delta-Step       | hybrid  | atomicMin(no-check) |      98,304 |      63,036 |   192 |      0 | PASS 100% |
+  +--------------------------+---------+---------------------+-------------+-------------+-------+--------+-----------+
+  | CPU A* (reference check) | -       | -                   |           3 |           0 |     3 |      0 | PASS 100% |
+  | A* Naive-Relax           | thread  | atomicMin+RBA       |           3 |           0 |     3 |      0 | PASS 100% |
+  | A* Frontier              | hybrid  | atomicMin+RBA       |           3 |           0 |     3 |      0 | PASS 100% |
+  | A* Delta-Step            | hybrid  | atomicMin+RBA       |           3 |           0 |     3 |      0 | PASS 100% |
+  | A* Delta-Step            | thread  | atomicCAS+RBA       |           3 |           0 |     3 |      0 | PASS 100% |
+  +--------------------------+---------+---------------------+-------------+-------------+-------+--------+-----------+
+
+>>> Building graph: grid, ~10,000 vertices
+    (generated + CSR built in 1.3 ms)
+  Graph  grid_100x100
+    Vertices (n)      : 10000
+    Directed arcs (m) : 39822   (avg degree 3.98, max degree 7)
+    Weights           : [54 .. 359], mean 155.4
+    Coordinates       : yes   (admissible h-scale = 0.995795)
+    CSR size          : 0.34 MB  (row_offsets + col_indices + weights)
+    VRAM allocated: 0.9 MB, graph upload (pinned + 3 streams): 1.70 ms
+
+>>> Benchmark: grid_100x100  (n = 10,000, m = 39,822)
+
+  SSSP (single-source shortest path), average of 3 sources | TEPS = reachable arcs / time
+  +-------------------------+-----------+-----------+-------+---------------+--------+--------+---------+-----------+
+  | Method                  | Time (ms) |      Iter | Syncs | Edges scanned | Work/m |  MTEPS | Speedup | Verify    |
+  +=========================+===========+===========+=======+===============+========+========+=========+===========+
+  | CPU Dijkstra (1 thread) |     0.922 |         - |     - |        39,822 |   1.00 | 43.2 M |   1.00x | reference |
+  | GPU K1 Naive-Relax      |      3.11 |       146 |   146 |       297,292 |   7.47 | 12.8 M |   0.30x | PASS 100% |
+  | GPU K2 Frontier         |      2.39 |       146 |    19 |       297,292 |   7.47 | 16.7 M |   0.39x | PASS 100% |
+  | GPU K2 Delta-Stepping   |      3.49 | 165 (13b) |    51 |        48,687 |   1.22 | 11.4 M |   0.26x | PASS 100% |
+  +-------------------------+-----------+-----------+-------+---------------+--------+--------+---------+-----------+
+
+  Point-to-point A* (admissible Euclidean heuristic), average of 3 queries
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+  | Method                   | Time (ms) | Edges scanned | Work-MTEPS | Speedup vs CPU A* | Verify    |
+  +==========================+===========+===============+============+===================+===========+
+  | CPU Dijkstra early-exit  |      1.15 |             - |          - |             0.92x | reference |
+  | CPU A* (1 thread)        |      1.06 |        26,382 |     24.9 M |             1.00x | reference |
+  | GPU A* K1 Naive-Relax    |      3.17 |       275,680 |     86.9 M |             0.33x | PASS 100% |
+  | GPU A* K2 Frontier       |      2.28 |       275,680 |    121.0 M |             0.46x | PASS 100% |
+  | GPU A* K2 Delta-Stepping |      3.18 |        51,607 |     16.2 M |             0.33x | PASS 100% |
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+
+>>> Building graph: grid, ~100,000 vertices
+    (generated + CSR built in 15.7 ms)
+  Graph  grid_316x316
+    Vertices (n)      : 99856
+    Directed arcs (m) : 399762   (avg degree 4.00, max degree 7)
+    Weights           : [53 .. 371], mean 155.9
+    Coordinates       : yes   (admissible h-scale = 0.992845)
+    CSR size          : 3.43 MB  (row_offsets + col_indices + weights)
+    VRAM allocated: 8.6 MB, graph upload (pinned + 3 streams): 3.56 ms
+
+>>> Benchmark: grid_316x316  (n = 99,856, m = 399,762)
+
+  SSSP (single-source shortest path), average of 3 sources | TEPS = reachable arcs / time
+  +-------------------------+-----------+-----------+-------+---------------+--------+--------+---------+-----------+
+  | Method                  | Time (ms) |      Iter | Syncs | Edges scanned | Work/m |  MTEPS | Speedup | Verify    |
+  +=========================+===========+===========+=======+===============+========+========+=========+===========+
+  | CPU Dijkstra (1 thread) |     16.05 |         - |     - |       399,762 |   1.00 | 24.9 M |   1.00x | reference |
+  | GPU K1 Naive-Relax      |     14.97 |       494 |   494 |    11,076,760 |  27.71 | 26.7 M |   1.07x | PASS 100% |
+  | GPU K2 Frontier         |     19.72 |       494 |    62 |    11,092,799 |  27.75 | 20.3 M |   0.81x | PASS 100% |
+  | GPU K2 Delta-Stepping   |     20.88 | 565 (44b) |   173 |       486,763 |   1.22 | 19.1 M |   0.77x | PASS 100% |
+  +-------------------------+-----------+-----------+-------+---------------+--------+--------+---------+-----------+
+
+  Point-to-point A* (admissible Euclidean heuristic), average of 3 queries
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+  | Method                   | Time (ms) | Edges scanned | Work-MTEPS | Speedup vs CPU A* | Verify    |
+  +==========================+===========+===============+============+===================+===========+
+  | CPU Dijkstra early-exit  |     31.95 |             - |          - |             1.19x | reference |
+  | CPU A* (1 thread)        |     37.98 |       327,896 |      8.6 M |             1.00x | reference |
+  | GPU A* K1 Naive-Relax    |     17.97 |    10,827,346 |    602.6 M |             2.11x | PASS 100% |
+  | GPU A* K2 Frontier       |     14.68 |    10,843,726 |    738.7 M |             2.59x | PASS 100% |
+  | GPU A* K2 Delta-Stepping |     15.47 |       648,879 |     41.9 M |             2.45x | PASS 100% |
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+
+>>> Building graph: grid, ~1,000,000 vertices
+    (generated + CSR built in 314.1 ms)
+  Graph  grid_1000x1000
+    Vertices (n)      : 1000000
+    Directed arcs (m) : 4008120   (avg degree 4.01, max degree 8)
+    Weights           : [51 .. 380], mean 155.9
+    Coordinates       : yes   (admissible h-scale = 0.991796)
+    CSR size          : 34.39 MB  (row_offsets + col_indices + weights)
+    VRAM allocated: 86.4 MB, graph upload (pinned + 3 streams): 41.83 ms
+
+>>> Benchmark: grid_1000x1000  (n = 1,000,000, m = 4,008,120)
+
+  SSSP (single-source shortest path), average of 3 sources | TEPS = reachable arcs / time
+  +-------------------------+-----------+-------------+-------+---------------+--------+--------+---------+-----------+
+  | Method                  | Time (ms) |        Iter | Syncs | Edges scanned | Work/m |  MTEPS | Speedup | Verify    |
+  +=========================+===========+=============+=======+===============+========+========+=========+===========+
+  | CPU Dijkstra (1 thread) |     207.3 |           - |     - |     4,008,120 |   1.00 | 19.3 M |   1.00x | reference |
+  | GPU K1 Naive-Relax      |     126.1 |        1491 |  1491 |   351,656,080 |  87.74 | 31.8 M |   1.64x | PASS 100% |
+  | GPU K2 Frontier         |     107.6 |        1491 |   187 |   277,136,119 |  69.14 | 37.2 M |   1.93x | PASS 100% |
+  | GPU K2 Delta-Stepping   |     52.73 | 1710 (131b) |   522 |     4,911,090 |   1.23 | 76.0 M |   3.93x | PASS 100% |
+  +-------------------------+-----------+-------------+-------+---------------+--------+--------+---------+-----------+
+
+  Point-to-point A* (admissible Euclidean heuristic), average of 3 queries
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+  | Method                   | Time (ms) | Edges scanned | Work-MTEPS | Speedup vs CPU A* | Verify    |
+  +==========================+===========+===============+============+===================+===========+
+  | CPU Dijkstra early-exit  |     244.9 |             - |          - |             0.90x | reference |
+  | CPU A* (1 thread)        |     220.4 |     2,622,869 |     11.9 M |             1.00x | reference |
+  | GPU A* K1 Naive-Relax    |     116.1 |   320,641,218 |     2.76 G |             1.90x | PASS 100% |
+  | GPU A* K2 Frontier       |     127.6 |   247,542,122 |     1.94 G |             1.73x | PASS 100% |
+  | GPU A* K2 Delta-Stepping |     53.94 |     5,170,905 |     95.9 M |             4.09x | PASS 100% |
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+
+  SUMMARY - speedup of GPU over single-thread CPU vs graph size
+  +----------------+-----------+-----------+--------------+-----------+--------------+-----------+--------------+------------+--------+-------------+------------+--------+
+  | Graph          |         V |         E | CPU Dijkstra | GPU Naive | GPU Frontier | GPU Delta | Best speedup | Best GTEPS | CPU A* | GPU A* best | A* speedup | Verify |
+  +================+===========+===========+==============+===========+==============+===========+==============+============+========+=============+============+========+
+  | grid_100x100   |    10,000 |    39,822 |        0.922 |      3.11 |         2.39 |      3.49 |        0.39x |      0.017 |   1.06 |        2.28 |      0.46x | PASS   |
+  | grid_316x316   |    99,856 |   399,762 |        16.05 |     14.97 |        19.72 |     20.88 |        1.07x |      0.027 |  37.98 |       14.68 |      2.59x | PASS   |
+  | grid_1000x1000 | 1,000,000 | 4,008,120 |        207.3 |     126.1 |        107.6 |     52.73 |        3.93x |      0.076 |  220.4 |       53.94 |      4.09x | PASS   |
+  +----------------+-----------+-----------+--------------+-----------+--------------+-----------+--------------+------------+--------+-------------+------------+--------+
+    (generated + CSR built in 167.0 ms)
+
+>>> Atomic contention study: grid_1000x1000
+
+  Atomic strategies (Read-Before-Atomic vs blind atomicMin vs CAS loop), average of 3 sources
+  +-------------+---------------------+-----------+----------------+--------------+----------------+---------------+-----------+
+  | Algorithm   | Atomic mode         | Time (ms) | Atomics issued | Real updates | Atomics/update | Atomics saved | Verify    |
+  +=============+=====================+===========+================+==============+================+===============+===========+
+  | Naive-Relax | atomicMin(no-check) |     109.6 |    323,197,890 |   99,774,769 |           3.24 |      baseline | PASS 100% |
+  | Naive-Relax | atomicMin+RBA       |     114.0 |    102,494,644 |   99,773,280 |           1.03 |         68.3% | PASS 100% |
+  | Naive-Relax | atomicCAS+RBA       |     113.5 |    105,404,150 |  100,170,724 |           1.05 |         67.4% | PASS 100% |
+  +-------------+---------------------+-----------+----------------+--------------+----------------+---------------+-----------+
+  | Frontier    | atomicMin(no-check) |     103.9 |    252,854,096 |   75,304,423 |           3.36 |      baseline | PASS 100% |
+  | Frontier    | atomicMin+RBA       |     102.5 |     77,249,247 |   76,090,500 |           1.02 |         69.4% | PASS 100% |
+  | Frontier    | atomicCAS+RBA       |     103.0 |     78,136,108 |   76,127,891 |           1.03 |         69.1% | PASS 100% |
+  +-------------+---------------------+-----------+----------------+--------------+----------------+---------------+-----------+
+  | Delta-Step  | atomicMin(no-check) |     55.59 |      4,909,720 |    1,592,480 |           3.08 |      baseline | PASS 100% |
+  | Delta-Step  | atomicMin+RBA       |     44.10 |      1,648,699 |    1,590,227 |           1.04 |         66.4% | PASS 100% |
+  | Delta-Step  | atomicCAS+RBA       |     45.38 |      1,671,351 |    1,591,601 |           1.05 |         66.0% | PASS 100% |
+  +-------------+---------------------+-----------+----------------+--------------+----------------+---------------+-----------+
+
+>>> Host-device synchronization study: grid_1000x1000
+
+  Kernels launched per host synchronization (S = 1: classic loop, sync after every iteration)
+  +------------+--------+----+-----------+------------+----------+------------+--------+-----------+
+  | Algorithm  | Query  |  S | Time (ms) | Iterations | Launches | Host syncs | vs S=1 | Verify    |
+  +============+========+====+===========+============+==========+============+========+===========+
+  | Frontier   | SSSP   |  1 |     118.1 |       1482 |     1482 |       1482 |  1.00x | PASS 100% |
+  | Frontier   | SSSP   |  2 |     110.2 |       1482 |     1483 |        742 |  1.07x | PASS 100% |
+  | Frontier   | SSSP   |  4 |     105.6 |       1482 |     1483 |        371 |  1.12x | PASS 100% |
+  | Frontier   | SSSP   |  8 |     104.0 |       1482 |     1485 |        186 |  1.14x | PASS 100% |
+  | Frontier   | SSSP   | 16 |     103.4 |       1482 |     1493 |         93 |  1.14x | PASS 100% |
+  | Frontier   | SSSP   | 32 |     102.7 |       1482 |     1493 |         47 |  1.15x | PASS 100% |
+  +------------+--------+----+-----------+------------+----------+------------+--------+-----------+
+  | Delta-Step | SSSP   |  1 |     59.40 |       1701 |     1701 |       1830 |  1.00x | PASS 100% |
+  | Delta-Step | SSSP   |  2 |     51.59 |       1701 |     1723 |       1055 |  1.15x | PASS 100% |
+  | Delta-Step | SSSP   |  4 |     47.77 |       1701 |     1766 |        667 |  1.24x | PASS 100% |
+  | Delta-Step | SSSP   |  8 |     47.81 |       1701 |     2199 |        517 |  1.24x | PASS 100% |
+  | Delta-Step | SSSP   | 16 |     45.35 |       1701 |     2204 |        388 |  1.31x | PASS 100% |
+  | Delta-Step | SSSP   | 32 |     59.08 |       1701 |     4279 |        388 |  1.01x | PASS 100% |
+  +------------+--------+----+-----------+------------+----------+------------+--------+-----------+
+  | Delta-Step | A* p2p |  1 |     88.01 |       2319 |     2319 |       2360 |  1.00x | PASS 100% |
+  | Delta-Step | A* p2p |  2 |     65.32 |       2319 |     2340 |       1232 |  1.35x | PASS 100% |
+  | Delta-Step | A* p2p |  4 |     58.84 |       2319 |     2384 |        668 |  1.50x | PASS 100% |
+  | Delta-Step | A* p2p |  8 |     53.34 |       2319 |     2476 |        387 |  1.65x | PASS 100% |
+  | Delta-Step | A* p2p | 16 |     53.30 |       2319 |     2692 |        248 |  1.65x | PASS 100% |
+  | Delta-Step | A* p2p | 32 |     54.25 |       2319 |     3018 |        175 |  1.62x | PASS 100% |
+  +------------+--------+----+-----------+------------+----------+------------+--------+-----------+
+
+>>> Delta sweep: grid_1000x1000  (avg weight 155.9, avg degree 4.01)
+
+  Delta-Stepping parameter sweep (small Delta -> Dijkstra-like, huge Delta -> Bellman-Ford-like)
+  +--------------+------------+-----------+---------+--------------+---------------+--------+-----------+
+  |        Delta | Delta/avgW | Time (ms) | Buckets | Kernel iters | Edges scanned | Work/m | Verify    |
+  +==============+============+===========+=========+==============+===============+========+===========+
+  |           78 |       0.50 |     251.1 |    1977 |         4925 |     4,008,130 |   1.00 | PASS 100% |
+  |          312 |       2.00 |     85.01 |     495 |         2412 |     4,157,422 |   1.04 | PASS 100% |
+  | 1,245 (auto) |       7.99 |     45.50 |     124 |         1626 |     4,912,234 |   1.23 | PASS 100% |
+  |        1,247 |       8.00 |     45.58 |     124 |         1628 |     4,913,118 |   1.23 | PASS 100% |
+  |        4,989 |      32.00 |     35.89 |      31 |         1479 |    11,598,761 |   2.89 | PASS 100% |
+  |       19,955 |     128.00 |     36.38 |       8 |         1433 |    46,722,404 |  11.66 | PASS 100% |
+  |      159,644 |    1024.00 |     116.1 |       1 |         1416 |   250,862,275 |  62.59 | PASS 100% |
+  +--------------+------------+-----------+---------+--------------+---------------+--------+-----------+
+    (generated + CSR built in 35.3 ms)
+  Graph  grid_500x500
+    Vertices (n)      : 250000
+    Directed arcs (m) : 1001748   (avg degree 4.01, max degree 8)
+    Weights           : [51 .. 378], mean 155.9
+    Coordinates       : yes   (admissible h-scale = 0.992845)
+    CSR size          : 8.60 MB  (row_offsets + col_indices + weights)
+
+>>> Multi-source pathfinding: grid_500x500
+
+  K sources: CPU Dijkstra x K (1 thread / OpenMP 2 threads) vs GPU
+  +----+-------------+--------------+--------------------+---------------+-----------+------------+-----------------+-----------+
+  |  K | CPU 1T (ms) | CPU OMP (ms) | GPU batch Frontier | GPU K x Delta | vs CPU 1T | vs CPU OMP | Queries/s (GPU) | Verify    |
+  +====+=============+==============+====================+===============+===========+============+=================+===========+
+  |  1 |       29.83 |        31.14 |              26.57 |         29.92 |     1.12x |      1.17x |            37.6 | PASS 100% |
+  |  2 |       63.17 |        66.66 |              27.21 |         43.76 |     2.32x |      2.45x |            73.5 | PASS 100% |
+  |  4 |       127.7 |        90.21 |              42.91 |         88.13 |     2.98x |      2.10x |            93.2 | PASS 100% |
+  |  8 |       303.0 |        182.3 |              115.5 |         186.4 |     2.62x |      1.58x |            69.3 | PASS 100% |
+  | 16 |       511.6 |        387.8 |              317.5 |         368.5 |     1.61x |      1.22x |            50.4 | PASS 100% |
+  +----+-------------+--------------+--------------------+---------------+-----------+------------+-----------------+-----------+
+
+  ================================
+  ## FINAL VERIFICATION SUMMARY ##
+  ================================
+  GPU runs verified       : 93
+  Distance comparisons    : 106,911,115
+  Parent-tree checks      : 98,702,079
+  Reconstructed paths     : 8,139
+  Errors                  : 0
+  >>> PASS 100.00% <<<
+
+  CSV results written to: results/
+

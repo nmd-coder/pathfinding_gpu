@@ -76,13 +76,15 @@ struct RelaxCtx {
     const u32* h;          // heuristic [n] (A*) hoặc nullptr
     u32 target;            // đích (A*)
     const u32* in;         // F_curr
-    u32 inSize;
+    u32 inSize;            // kích thước F_curr do Host truyền (khi inCount == nullptr)
+    const u32* inCount;    // nếu khác nullptr: kernel tự đọc kích thước F_curr trên GPU
+                           // => Host phát nhiều kernel liên tiếp mà không cần đồng bộ
     u32* inMask;           // bitmask của F_curr (bị xóa khi xử lý) hoặc nullptr
     DevQueue nearQ;        // F_next (key < bound)
     DevQueue farQ;         // "far pile" (key >= bound) - Delta-Stepping
     DevQueue rQ;           // tập R: các đỉnh đã xử lý trong bucket (để nới cạnh nặng)
     u64 bound;             // cận trên bucket hiện tại; ~0 => mọi đỉnh vào nearQ
-    unsigned long long* stats;  // [4] edges, atomics, updates, pushes (hoặc nullptr)
+    unsigned long long* stats;  // [5] edges, atomics, updates, pushes, số vòng có việc (hoặc nullptr)
 };
 
 // ---------------------------------------------------------------------------
@@ -201,8 +203,14 @@ __device__ __forceinline__ void relaxRange(const RelaxCtx& c, u32 u, u32 du, u32
 template <int SEL, bool ASTAR, AtomicMode AM, Mapping MAP, bool MARK_R>
 __global__ void relaxFrontierKernel(RelaxCtx c) {
     LocalStats ls;
-    const u32 idx = blockIdx.x * blockDim.x + threadIdx.x;
-    const bool valid = idx < c.inSize;
+    // Kích thước biên: do Host truyền, hoặc đọc trực tiếp từ bộ đếm trên GPU (không cần đồng bộ Host)
+    const u32 size = c.inCount ? ldU32(c.inCount) : c.inSize;
+    if (c.stats && size > 0 && blockIdx.x == 0 && threadIdx.x == 0) atomicAdd(&c.stats[4], 1ull);
+
+    // Vòng grid-stride: điều kiện lặp đồng nhất trong block (base giống nhau cho mọi luồng)
+    for (u32 blockBase = blockIdx.x * blockDim.x; blockBase < size; blockBase += gridDim.x * blockDim.x) {
+    const u32 idx = blockBase + threadIdx.x;
+    const bool valid = idx < size;
 
     u32 gi = 0, u = 0, base = 0, du = INF_DIST, ub = INF_DIST, beg = 0, end = 0;
     if (valid) {
@@ -270,6 +278,7 @@ __global__ void relaxFrontierKernel(RelaxCtx c) {
 
     // ---------------- Tầng 3: mỗi luồng tự xử lý đỉnh bậc nhỏ ----------------
     if (!done) relaxRange<ASTAR, AM>(c, u, du, base, ub, beg, end, 1u, ls);
+    }  // hết vòng grid-stride
 
     if (c.stats) flushStats(c.stats, ls);
 }

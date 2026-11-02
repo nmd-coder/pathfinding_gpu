@@ -1,0 +1,123 @@
+
+  ==========================================================================================
+  ## GPU-Accelerated Parallel Dijkstra / A*  |  CSR + Frontier + Delta-Stepping + Atomics ##
+  ==========================================================================================
+
+>>> Building graph: rmat, ~16,384 vertices
+    (generated + CSR built in 41.2 ms)
+  Graph  rmat_s14_ef8
+    Vertices (n)      : 16384
+    Directed arcs (m) : 227784   (avg degree 13.90, max degree 2427)
+    Weights           : [1 .. 1000], mean 501.3
+    Coordinates       : no (A* -> h = 0)
+    CSR size          : 1.80 MB  (row_offsets + col_indices + weights)
+    VRAM allocated: 2.4 MB, graph upload (pinned + 3 streams): 1.95 ms
+
+>>> Benchmark: rmat_s14_ef8  (n = 16,384, m = 227,784)
+
+  SSSP (single-source shortest path), average of 5 sources | TEPS = reachable arcs / time
+  +-------------------------+-----------+---------+-------+---------------+--------+---------+---------+-----------+
+  | Method                  | Time (ms) |    Iter | Syncs | Edges scanned | Work/m |   MTEPS | Speedup | Verify    |
+  +=========================+===========+=========+=======+===============+========+=========+=========+===========+
+  | CPU Dijkstra (1 thread) |      3.37 |       - |     - |       227,772 |   1.00 |  67.6 M |   1.00x | reference |
+  | GPU K1 Naive-Relax      |      6.60 |      16 |    16 |     1,040,009 |   4.57 |  34.5 M |   0.51x | PASS 100% |
+  | GPU K2 Frontier         |      1.44 |      16 |     2 |     1,040,009 |   4.57 | 157.8 M |   2.34x | PASS 100% |
+  | GPU K2 Delta-Stepping   |      1.60 | 19 (2b) |     6 |     1,019,806 |   4.48 | 142.6 M |   2.11x | PASS 100% |
+  +-------------------------+-----------+---------+-------+---------------+--------+---------+---------+-----------+
+
+  Point-to-point A* (admissible Euclidean heuristic), average of 5 queries
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+  | Method                   | Time (ms) | Edges scanned | Work-MTEPS | Speedup vs CPU A* | Verify    |
+  +==========================+===========+===============+============+===================+===========+
+  | CPU Dijkstra early-exit  |      4.53 |             - |          - |             0.99x | reference |
+  | CPU A* (1 thread)        |      4.48 |       227,535 |     50.8 M |             1.00x | reference |
+  | GPU A* K1 Naive-Relax    |      8.50 |     1,037,096 |    122.1 M |             0.53x | PASS 100% |
+  | GPU A* K2 Frontier       |      1.60 |     1,037,096 |    647.8 M |             2.80x | PASS 100% |
+  | GPU A* K2 Delta-Stepping |      1.69 |     1,018,877 |    603.8 M |             2.66x | PASS 100% |
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+
+>>> Building graph: rmat, ~131,072 vertices
+    (generated + CSR built in 411.8 ms)
+  Graph  rmat_s17_ef8
+    Vertices (n)      : 131072
+    Directed arcs (m) : 1942362   (avg degree 14.82, max degree 9997)
+    Weights           : [1 .. 1000], mean 500.4
+    Coordinates       : no (A* -> h = 0)
+    CSR size          : 15.32 MB  (row_offsets + col_indices + weights)
+    VRAM allocated: 20.1 MB, graph upload (pinned + 3 streams): 15.42 ms
+
+>>> Benchmark: rmat_s17_ef8  (n = 131,072, m = 1,942,362)
+
+  SSSP (single-source shortest path), average of 5 sources | TEPS = reachable arcs / time
+  +-------------------------+-----------+---------+-------+---------------+--------+---------+---------+-----------+
+  | Method                  | Time (ms) |    Iter | Syncs | Edges scanned | Work/m |   MTEPS | Speedup | Verify    |
+  +=========================+===========+=========+=======+===============+========+=========+=========+===========+
+  | CPU Dijkstra (1 thread) |     36.03 |       - |     - |     1,942,250 |   1.00 |  53.9 M |   1.00x | reference |
+  | GPU K1 Naive-Relax      |     23.37 |      17 |    17 |     7,368,598 |   3.79 |  83.1 M |   1.54x | PASS 100% |
+  | GPU K2 Frontier         |      4.25 |      18 |     3 |     9,039,391 |   4.65 | 456.8 M |   8.48x | PASS 100% |
+  | GPU K2 Delta-Stepping   |      4.70 | 24 (3b) |    10 |     8,275,957 |   4.26 | 413.1 M |   7.66x | PASS 100% |
+  +-------------------------+-----------+---------+-------+---------------+--------+---------+---------+-----------+
+
+  Point-to-point A* (admissible Euclidean heuristic), average of 5 queries
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+  | Method                   | Time (ms) | Edges scanned | Work-MTEPS | Speedup vs CPU A* | Verify    |
+  +==========================+===========+===============+============+===================+===========+
+  | CPU Dijkstra early-exit  |     47.64 |             - |          - |             1.02x | reference |
+  | CPU A* (1 thread)        |     48.40 |     1,940,637 |     40.1 M |             1.00x | reference |
+  | GPU A* K1 Naive-Relax    |     32.72 |     7,350,963 |    224.6 M |             1.48x | PASS 100% |
+  | GPU A* K2 Frontier       |      4.78 |     8,941,494 |     1.87 G |             10.1x | PASS 100% |
+  | GPU A* K2 Delta-Stepping |      5.05 |     8,223,276 |     1.63 G |             9.59x | PASS 100% |
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+
+>>> Building graph: rmat, ~1,048,576 vertices
+    (generated + CSR built in 4538.1 ms)
+  Graph  rmat_s20_ef8
+    Vertices (n)      : 1048576
+    Directed arcs (m) : 16084984   (avg degree 15.34, max degree 39665)
+    Weights           : [1 .. 1000], mean 500.6
+    Coordinates       : no (A* -> h = 0)
+    CSR size          : 126.72 MB  (row_offsets + col_indices + weights)
+    VRAM allocated: 165.2 MB, graph upload (pinned + 3 streams): 139.86 ms
+
+>>> Benchmark: rmat_s20_ef8  (n = 1,048,576, m = 16,084,984)
+
+  SSSP (single-source shortest path), average of 5 sources | TEPS = reachable arcs / time
+  +-------------------------+-----------+---------+-------+---------------+--------+---------+---------+-----------+
+  | Method                  | Time (ms) |    Iter | Syncs | Edges scanned | Work/m |   MTEPS | Speedup | Verify    |
+  +=========================+===========+=========+=======+===============+========+=========+=========+===========+
+  | CPU Dijkstra (1 thread) |     457.2 |       - |     - |    16,084,076 |   1.00 |  35.2 M |   1.00x | reference |
+  | GPU K1 Naive-Relax      |     125.8 |      17 |    17 |    61,085,067 |   3.80 | 127.8 M |   3.63x | PASS 100% |
+  | GPU K2 Frontier         |     32.07 |      18 |     3 |    71,009,715 |   4.41 | 501.6 M |   14.3x | PASS 100% |
+  | GPU K2 Delta-Stepping   |     35.16 | 25 (3b) |    10 |    70,651,379 |   4.39 | 457.5 M |   13.0x | PASS 100% |
+  +-------------------------+-----------+---------+-------+---------------+--------+---------+---------+-----------+
+
+  Point-to-point A* (admissible Euclidean heuristic), average of 5 queries
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+  | Method                   | Time (ms) | Edges scanned | Work-MTEPS | Speedup vs CPU A* | Verify    |
+  +==========================+===========+===============+============+===================+===========+
+  | CPU Dijkstra early-exit  |     575.6 |             - |          - |             1.01x | reference |
+  | CPU A* (1 thread)        |     583.7 |    16,068,265 |     27.5 M |             1.00x | reference |
+  | GPU A* K1 Naive-Relax    |     315.2 |    61,014,151 |    193.6 M |             1.85x | PASS 100% |
+  | GPU A* K2 Frontier       |     58.26 |    71,946,010 |     1.23 G |             10.0x | PASS 100% |
+  | GPU A* K2 Delta-Stepping |     59.87 |    70,455,158 |     1.18 G |             9.75x | PASS 100% |
+  +--------------------------+-----------+---------------+------------+-------------------+-----------+
+
+  SUMMARY - speedup of GPU over single-thread CPU vs graph size
+  +--------------+-----------+------------+--------------+-----------+--------------+-----------+--------------+------------+--------+-------------+------------+--------+
+  | Graph        |         V |          E | CPU Dijkstra | GPU Naive | GPU Frontier | GPU Delta | Best speedup | Best GTEPS | CPU A* | GPU A* best | A* speedup | Verify |
+  +==============+===========+============+==============+===========+==============+===========+==============+============+========+=============+============+========+
+  | rmat_s14_ef8 |    16,384 |    227,784 |         3.37 |      6.60 |         1.44 |      1.60 |        2.34x |      0.158 |   4.48 |        1.60 |      2.80x | PASS   |
+  | rmat_s17_ef8 |   131,072 |  1,942,362 |        36.03 |     23.37 |         4.25 |      4.70 |        8.48x |      0.457 |  48.40 |        4.78 |      10.1x | PASS   |
+  | rmat_s20_ef8 | 1,048,576 | 16,084,984 |        457.2 |     125.8 |        32.07 |     35.16 |        14.3x |      0.502 |  583.7 |       58.26 |      10.0x | PASS   |
+  +--------------+-----------+------------+--------------+-----------+--------------+-----------+--------------+------------+--------+-------------+------------+--------+
+
+  ================================
+  ## FINAL VERIFICATION SUMMARY ##
+  ================================
+  GPU runs verified       : 18
+  Distance comparisons    : 17,940,525
+  Parent-tree checks      : 9,507,105
+  Reconstructed paths     : 2,925
+  Errors                  : 0
+  >>> PASS 100.00% <<<
+

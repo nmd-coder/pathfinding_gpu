@@ -1,0 +1,42 @@
+
+  ==========================================================================================
+  ## GPU-Accelerated Parallel Dijkstra / A*  |  CSR + Frontier + Delta-Stepping + Atomics ##
+  ==========================================================================================
+    (generated + CSR built in 222.3 ms)
+  Graph  grid_1000x1000
+    Vertices (n)      : 1000000
+    Directed arcs (m) : 4008120   (avg degree 4.01, max degree 8)
+    Weights           : [51 .. 380], mean 155.9
+    Coordinates       : yes   (admissible h-scale = 0.991796)
+    CSR size          : 34.39 MB  (row_offsets + col_indices + weights)
+    VRAM allocated: 86.4 MB, graph upload: 34.33 ms, auto Delta = 1245
+
+>>> Atomic contention study: grid_1000x1000
+
+  Atomic strategies (Read-Before-Atomic vs blind atomicMin vs CAS loop), average of 5 sources
+  +-------------+---------------------+-----------+----------------+--------------+----------------+---------------+-----------+
+  | Algorithm   | Atomic mode         | Time (ms) | Atomics issued | Real updates | Atomics/update | Atomics saved | Verify    |
+  +=============+=====================+===========+================+==============+================+===============+===========+
+  | Naive-Relax | atomicMin(no-check) |     121.5 |    347,231,971 |  107,127,762 |           3.24 |      baseline | PASS 100% |
+  | Naive-Relax | atomicMin+RBA       |     126.5 |    110,070,203 |  107,158,156 |           1.03 |         68.3% | PASS 100% |
+  | Naive-Relax | atomicCAS+RBA       |     126.2 |    113,175,095 |  107,564,038 |           1.05 |         67.4% | PASS 100% |
+  +-------------+---------------------+-----------+----------------+--------------+----------------+---------------+-----------+
+  | Frontier    | atomicMin(no-check) |     114.7 |    269,804,790 |   80,315,053 |           3.36 |      baseline | PASS 100% |
+  | Frontier    | atomicMin+RBA       |     113.9 |     82,515,658 |   81,286,453 |           1.02 |         69.4% | PASS 100% |
+  | Frontier    | atomicCAS+RBA       |     115.0 |     83,546,738 |   81,426,151 |           1.03 |         69.0% | PASS 100% |
+  +-------------+---------------------+-----------+----------------+--------------+----------------+---------------+-----------+
+  | Delta-Step  | atomicMin(no-check) |     45.83 |      4,909,336 |    1,591,974 |           3.08 |      baseline | PASS 100% |
+  | Delta-Step  | atomicMin+RBA       |     46.64 |      1,648,900 |    1,590,560 |           1.04 |         66.4% | PASS 100% |
+  | Delta-Step  | atomicCAS+RBA       |     48.16 |      1,671,380 |    1,591,242 |           1.05 |         66.0% | PASS 100% |
+  +-------------+---------------------+-----------+----------------+--------------+----------------+---------------+-----------+
+
+  ================================
+  ## FINAL VERIFICATION SUMMARY ##
+  ================================
+  GPU runs verified       : 9
+  Distance comparisons    : 45,000,000
+  Parent-tree checks      : 44,999,820
+  Reconstructed paths     : 720
+  Errors                  : 0
+  >>> PASS 100.00% <<<
+

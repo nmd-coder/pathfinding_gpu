@@ -1,0 +1,38 @@
+
+  ==========================================================================================
+  ## GPU-Accelerated Parallel Dijkstra / A*  |  CSR + Frontier + Delta-Stepping + Atomics ##
+  ==========================================================================================
+    (generated + CSR built in 309.4 ms)
+  Graph  grid_1000x1000
+    Vertices (n)      : 1000000
+    Directed arcs (m) : 4008120   (avg degree 4.01, max degree 8)
+    Weights           : [51 .. 380], mean 155.9
+    Coordinates       : yes   (admissible h-scale = 0.991796)
+    CSR size          : 34.39 MB  (row_offsets + col_indices + weights)
+    VRAM allocated: 86.4 MB, graph upload: 43.69 ms, auto Delta = 1245
+
+>>> Thread mapping / load balancing: grid_1000x1000  (max degree 8)
+
+  Thread-per-vertex vs Warp-per-vertex vs Hybrid (CTA/Warp/Thread)
+  +------------+---------+-----------+-----------+-----------+
+  | Algorithm  | Mapping | Time (ms) | vs thread | Verify    |
+  +============+=========+===========+===========+===========+
+  | Frontier   | thread  |     125.6 |     1.00x | PASS 100% |
+  | Frontier   | warp    |     200.9 |     0.63x | PASS 100% |
+  | Frontier   | hybrid  |     126.7 |     0.99x | PASS 100% |
+  +------------+---------+-----------+-----------+-----------+
+  | Delta-Step | thread  |     51.28 |     1.00x | PASS 100% |
+  | Delta-Step | warp    |     120.3 |     0.43x | PASS 100% |
+  | Delta-Step | hybrid  |     51.66 |     0.99x | PASS 100% |
+  +------------+---------+-----------+-----------+-----------+
+
+  ================================
+  ## FINAL VERIFICATION SUMMARY ##
+  ================================
+  GPU runs verified       : 6
+  Distance comparisons    : 18,000,000
+  Parent-tree checks      : 17,999,928
+  Reconstructed paths     : 288
+  Errors                  : 0
+  >>> PASS 100.00% <<<
+

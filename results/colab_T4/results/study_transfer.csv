@@ -1,0 +1,4 @@
+graph,bytes,method,time_ms,gbps
+grid_2000x2000,144331908,cudaMemcpy (pageable),31.4226,4.5932
+grid_2000x2000,144331908,cudaMemcpyAsync (pinned),11.6870,12.3498
+grid_2000x2000,144331908,pinned + 3 CUDA streams (8MB chunks),11.7745,12.2580

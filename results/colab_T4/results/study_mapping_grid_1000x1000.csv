@@ -1,0 +1,7 @@
+graph,algorithm,mapping,time_ms,speedup_vs_thread,verify
+grid_1000x1000,Frontier,thread,125.6216,1.0000,PASS
+grid_1000x1000,Frontier,warp,200.9104,0.6253,PASS
+grid_1000x1000,Frontier,hybrid,126.6704,0.9917,PASS
+grid_1000x1000,Delta-Step,thread,51.2841,1.0000,PASS
+grid_1000x1000,Delta-Step,warp,120.3371,0.4262,PASS
+grid_1000x1000,Delta-Step,hybrid,51.6639,0.9926,PASS

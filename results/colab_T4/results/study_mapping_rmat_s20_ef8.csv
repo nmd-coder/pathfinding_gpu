@@ -1,0 +1,7 @@
+graph,algorithm,mapping,time_ms,speedup_vs_thread,verify
+rmat_s20_ef8,Frontier,thread,229.4404,1.0000,PASS
+rmat_s20_ef8,Frontier,warp,45.5967,5.0319,PASS
+rmat_s20_ef8,Frontier,hybrid,35.6904,6.4286,PASS
+rmat_s20_ef8,Delta-Step,thread,226.6577,1.0000,PASS
+rmat_s20_ef8,Delta-Step,warp,46.5646,4.8676,PASS
+rmat_s20_ef8,Delta-Step,hybrid,37.4476,6.0527,PASS

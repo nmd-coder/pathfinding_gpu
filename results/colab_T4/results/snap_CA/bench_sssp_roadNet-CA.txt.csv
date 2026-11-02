@@ -1,0 +1,5 @@
+graph,n,m,method,time_ms,iterations,edges_scanned,mteps,speedup,verify,host_syncs
+roadNet-CA.txt,1971281,5533214,CPU-Dijkstra,361.8060,0,5520776,15.2589,1,REF,0
+roadNet-CA.txt,1971281,5533214,Naive-Relax,131.2774,850.8,199215058,42.0543,2.7560,PASS,850.8
+roadNet-CA.txt,1971281,5533214,Frontier,137.5169,854.6,159653948,40.1462,2.6310,PASS,107.2
+roadNet-CA.txt,1971281,5533214,Delta-Step,38.0886,1528.8,8825618,144.9458,9.4991,PASS,324.2

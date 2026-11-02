@@ -1,0 +1,6 @@
+graph,n,m,method,time_ms,edges_scanned,speedup_vs_cpu_astar,verify
+roadNet-PA.txt,1090920,3083796,CPU-Dijkstra-early-exit,210.4975,-,-,REF
+roadNet-PA.txt,1090920,3083796,CPU-AStar,211.9150,3044930,1,REF
+roadNet-PA.txt,1090920,3083796,AStar-Naive-Relax,75.7512,146813942,2.7975,PASS
+roadNet-PA.txt,1090920,3083796,AStar-Frontier,82.1266,108983757,2.5803,PASS
+roadNet-PA.txt,1090920,3083796,AStar-Delta-Step,31.1034,4947635,6.8132,PASS
