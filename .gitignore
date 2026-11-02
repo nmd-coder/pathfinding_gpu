@@ -1,0 +1,25 @@
+# Build outputs
+pathfinder
+pathfinder.exe
+*.exe
+*.obj
+*.o
+*.exp
+*.lib
+*.pdb
+build/
+build_shim/
+
+# Experiment outputs & large datasets
+results/
+data/
+*.bin
+*.gr
+*.co
+*.gz
+
+# IDE
+.vs/
+.vscode/
+*.user
+__pycache__/
