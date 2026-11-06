@@ -138,11 +138,32 @@ def plot_multisource(rows):
     ax.plot(K, [float(r["cpu_omp_ms"]) for r in rows], marker="o", color="#111827", label=f"CPU OpenMP ({rows[0]['omp_threads']} threads)")
     ax.plot(K, [float(r["gpu_batch_ms"]) for r in rows], marker="o", color=COLORS["Frontier"], label="GPU batched Frontier")
     ax.plot(K, [float(r["gpu_seq_delta_ms"]) for r in rows], marker="o", color=COLORS["Delta"], label="GPU K x Delta-Stepping")
+    if "gpu_batch_delta_ms" in rows[0]:
+        ax.plot(K, [float(r["gpu_batch_delta_ms"]) for r in rows], marker="s", linewidth=2.4, color="#7c3aed", label="GPU batched Delta-Stepping")
     ax.set_xscale("log", base=2); ax.set_yscale("log")
     ax.set_xlabel("Number of sources K"); ax.set_ylabel("Total time (ms)")
     ax.set_title(f"Multi-source pathfinding: {rows[0]['graph']}")
     ax.legend()
-    save(fig, "multisource.png")
+    save(fig, f"multisource_{rows[0]['graph']}.png")
+
+
+def plot_compaction():
+    files = sorted(f for f in os.listdir(RES) if f.startswith("study_compaction_") and f.endswith(".csv"))
+    rows = [r for f in files for r in read(os.path.join(RES, f))]
+    if not rows:
+        return
+    graphs = list(dict.fromkeys(r["graph"] for r in rows))
+    modes = ["warp-atomic", "prefix-sum"]
+    fig, ax = plt.subplots(figsize=(7, 4.2))
+    w = 0.38
+    for i, m in enumerate(modes):
+        vals = [next((float(r["time_ms"]) for r in rows if r["graph"] == g and r["compaction"] == m), 0) for g in graphs]
+        bars = ax.bar([x + (i - 0.5) * w for x in range(len(graphs))], vals, w, label=m)
+        ax.bar_label(bars, fmt="%.1f", fontsize=8)
+    ax.set_xticks(range(len(graphs))); ax.set_xticklabels(graphs, fontsize=8)
+    ax.set_ylabel("Time (ms)"); ax.set_title("Frontier compaction: warp-aggregated atomic vs Prefix Sum (CUB)")
+    ax.legend()
+    save(fig, "compaction.png")
 
 
 def plot_mapping():
@@ -187,6 +208,9 @@ if __name__ == "__main__":
     plot_atomic(read(os.path.join(RES, "study_atomic.csv")))
     plot_delta()
     plot_sync()
-    plot_multisource(read(os.path.join(RES, "study_multisource.csv")))
+    for f in sorted(os.listdir(RES)):
+        if f.startswith("study_multisource") and f.endswith(".csv"):
+            plot_multisource(read(os.path.join(RES, f)))
+    plot_compaction()
     plot_mapping()
     print("Done.")

@@ -11,6 +11,7 @@
 //    bench       : benchmark SSSP + A* theo nhiều kích thước đồ thị
 //    atomic      : thí nghiệm giảm tranh chấp atomic (Read-Before-Atomic, CAS, no-check)
 //    delta       : quét tham số Delta
+//    compaction  : dựng biên kế tiếp bằng atomic gộp theo warp vs Prefix Sum (CUB)
 //    sync        : số kernel phát liên tiếp giữa 2 lần đồng bộ Host-Device (giảm overhead đồng bộ)
 //    mapping     : Thread / Warp / Hybrid (cân bằng tải)
 //    transfer    : pageable vs pinned vs pinned+streams
@@ -64,7 +65,7 @@ struct Config {
 static void usage() {
     printf(
         "Usage: pathfinder [--mode MODE] [options]\n"
-        "  --mode demo|all|info|verify|bench|atomic|delta|sync|mapping|transfer|multisource|single\n"
+        "  --mode demo|all|info|verify|bench|atomic|delta|sync|compaction|mapping|transfer|multisource|single\n"
         "Graph source (verify/atomic/delta/mapping/transfer/multisource/single):\n"
         "  --graph grid|rmat|dimacs|snap|bin   (default grid)\n"
         "  --n N              number of vertices for grid/rmat (e.g. 1e6)\n"
@@ -78,6 +79,7 @@ static void usage() {
         "GPU options:\n"
         "  --mapping thread|warp|hybrid   --atomic min|cas|nocheck   --delta D   --block B\n"
         "  --sync-every S     launch S relaxation kernels per host synchronization (default 8, 1 = classic)\n"
+        "  --compaction warp|scan   next-frontier construction: warp-aggregated atomics or CUB prefix sum\n"
         "Single query:\n"
         "  --algo naive|frontier|delta  --astar  --src S --dst T  --print-path\n"
         "Other:\n"
@@ -131,6 +133,10 @@ static bool parseArgs(int argc, char** argv, Config& c) {
         }
         else if (a == "--delta") c.gpu.delta = (u32)parseNum(next());
         else if (a == "--block") c.gpu.blockSize = (int)parseNum(next());
+        else if (a == "--compaction") {
+            std::string m = next();
+            c.gpu.compaction = (m == "scan" || m == "prefix") ? Compaction::PrefixScan : Compaction::WarpAtomic;
+        }
         else if (a == "--sync-every") c.gpu.syncEvery = std::max<u32>(1, (u32)parseNum(next()));
         else if (a == "--batch") c.batch = std::max<u32>(1, (u32)parseNum(next()));
         else if (a == "--threads") c.threads = (int)parseNum(next());
@@ -268,6 +274,11 @@ static void runVerify(const CSRGraph& g, const Config& c, GpuSolver& solver) {
     std::vector<Variant> vs;
     const GpuOptions& b = c.gpu;
     vs.push_back({"K1 Naive-Relax", opts(GpuAlgo::NaiveRelax, Mapping::Thread, AtomicMode::MinRBA, b)});
+    {
+        GpuOptions ps = opts(GpuAlgo::Frontier, Mapping::Hybrid, AtomicMode::MinRBA, b);
+        ps.compaction = Compaction::PrefixScan;
+        vs.push_back({"K2 Frontier (prefix-sum)", ps});
+    }
     for (Mapping m : {Mapping::Thread, Mapping::Warp, Mapping::Hybrid})
         vs.push_back({"K2 Frontier", opts(GpuAlgo::Frontier, m, AtomicMode::MinRBA, b)});
     for (Mapping m : {Mapping::Thread, Mapping::Warp, Mapping::Hybrid})
@@ -304,6 +315,31 @@ static void runVerify(const CSRGraph& g, const Config& c, GpuSolver& solver) {
         }
     }
 
+    // Đa nguồn: K nguồn trong 1 lần chạy GPU, so với K lần Dijkstra CPU
+    const u32 KB = 4;
+    std::vector<u32> msrc = pickSources(g, KB, c.seed + 31);
+    std::vector<std::vector<u32>> mref;
+    for (u32 s0 : msrc) mref.push_back(cpuDijkstra(g, s0).dist);
+    struct MsVariant { std::string name; GpuOptions o; VerifyReport v; };
+    std::vector<MsVariant> ms;
+    {
+        GpuOptions f = opts(GpuAlgo::Frontier, Mapping::Hybrid, AtomicMode::MinRBA, b);
+        GpuOptions fs = f; fs.compaction = Compaction::PrefixScan;
+        GpuOptions d = opts(GpuAlgo::DeltaStep, Mapping::Hybrid, AtomicMode::MinRBA, b);
+        ms = {{"MSSP K=4 Frontier batch", f, {}}, {"MSSP K=4 Frontier batch (prefix-sum)", fs, {}}, {"MSSP K=4 Delta-Step batch", d, {}}};
+        GpuSolver bsolver(g, KB);
+        for (auto& m : ms) {
+            std::vector<std::vector<u32>> gd;
+            bsolver.multiSource(msrc, m.o, &gd);
+            for (u32 i = 0; i < KB; ++i)
+                for (u32 v = 0; v < g.n; ++v) {
+                    m.v.distChecked++;
+                    if (gd[i][v] != mref[i][v] && m.v.distMismatch++ == 0)
+                        m.v.firstError = m.name + ": dist mismatch, source " + std::to_string(msrc[i]) + " vertex " + std::to_string(v);
+                }
+        }
+    }
+
     Table t("Verification matrix (GPU vs CPU std::priority_queue Dijkstra), " + fmtCount(srcs.size()) + " sources");
     t.setHeader({"Test", "Mapping", "Atomic", "Dist checks", "Tree checks", "Paths", "Errors", "Result"}, "lllrrrrl");
     auto addRow = [&](const std::string& name, const char* mp, const char* am, const VerifyReport& v) {
@@ -316,6 +352,8 @@ static void runVerify(const CSRGraph& g, const Config& c, GpuSolver& solver) {
     t.addSeparator();
     addRow("CPU A* (reference check)", "-", "-", cpuAStarRep);
     for (size_t i = 0; i < va.size(); ++i) addRow(va[i].name, toString(va[i].o.mapping), toString(va[i].o.atomic), ra[i]);
+    t.addSeparator();
+    for (auto& m : ms) addRow(m.name, toString(m.o.mapping), toString(m.o.atomic), m.v);
     t.print();
 }
 
@@ -619,6 +657,43 @@ static void runSyncStudy(const CSRGraph& g, const Config& c, GpuSolver& solver) 
 }
 
 // =============================================================================
+// 4c) NÉN DANH SÁCH BIÊN (2.3.3): atomic gộp theo warp vs Prefix Sum (CUB ExclusiveSum)
+// =============================================================================
+static void runCompactionStudy(const CSRGraph& g, const Config& c, GpuSolver& solver) {
+    printSection("Frontier compaction study: " + g.name);
+    CsvWriter csv(c.outDir + "/study_compaction_" + g.name + ".csv",
+                  {"graph", "compaction", "time_ms", "iterations", "launches", "pushes", "edges_scanned", "speedup_vs_warp", "verify"});
+    std::vector<u32> srcs = pickSources(g, c.queries, c.seed + 23);
+    std::vector<SSSPResult> refs;
+    for (u32 s0 : srcs) refs.push_back(cpuDijkstra(g, s0));
+    Table t("Building F_next: bitmask + warp-aggregated atomic queue vs flags + Prefix Sum + scatter (Frontier, SSSP)");
+    t.setHeader({"Compaction", "Time (ms)", "Iterations", "Kernel launches", "Frontier writes", "Edges scanned", "vs warp", "Verify"}, "lrrrrrrl");
+    double base = 0;
+    for (Compaction cm : {Compaction::WarpAtomic, Compaction::PrefixScan}) {
+        GpuOptions o = opts(GpuAlgo::Frontier, c.gpu.mapping, c.gpu.atomic, c.gpu);
+        o.compaction = cm;
+        solver.sssp(srcs[0], o, false);   // warm-up
+        double ms = 0, it = 0, la = 0, pu = 0, ed = 0;
+        VerifyReport v;
+        for (size_t q = 0; q < srcs.size(); ++q) {
+            GpuRunResult r = solver.sssp(srcs[q], o, true);
+            ms += r.ms; it += r.stats.iterations; la += r.stats.launches; pu += r.stats.pushes; ed += r.stats.edgesScanned;
+            v.merge(verifySSSP(g, srcs[q], refs[q].dist, r.dist, r.parent, 16, q));
+        }
+        const double Q = (double)srcs.size();
+        ms /= Q; it /= Q; la /= Q; pu /= Q; ed /= Q;
+        if (cm == Compaction::WarpAtomic) base = ms;
+        const double sp = base / std::max(1e-9, ms);
+        t.addRow({Cell(toString(cm)), Cell(fmtMs(ms)), Cell(fmt("%.0f", it)), Cell(fmt("%.0f", la)), Cell(fmtCount((u64)pu)),
+                  Cell(fmtCount((u64)ed)), Cell(fmtSpeedup(sp), speedupColor(sp)), verdictCell(v)});
+        csv.row({g.name, toString(cm), fmt("%.4f", ms), fmt("%.1f", it), fmt("%.1f", la), fmt("%.0f", pu), fmt("%.0f", ed),
+                 fmt("%.4f", sp), v.pass() ? "PASS" : "FAIL"});
+        account(v);
+    }
+    t.print();
+}
+
+// =============================================================================
 // 5) ÁNH XẠ LUỒNG / CÂN BẰNG TẢI (2.2.3, 2.4.3)
 // =============================================================================
 static void runMappingStudy(const CSRGraph& g, const Config& c, GpuSolver& solver, CsvWriter& csv) {
@@ -689,42 +764,49 @@ static void runMultiSource(const CSRGraph& g, const Config& c) {
         }
     }
     const int T = c.threads > 0 ? c.threads : cpuMaxThreads();
-    CsvWriter csv(c.outDir + "/study_multisource.csv",
-                  {"graph", "K", "cpu_1t_ms", "cpu_omp_ms", "omp_threads", "gpu_batch_ms", "gpu_seq_delta_ms",
-                   "speedup_vs_1t", "speedup_vs_omp", "verify"});
-    Table t("K sources: CPU Dijkstra x K (1 thread / OpenMP " + fmt("%.0f", T) + " threads) vs GPU");
-    t.setHeader({"K", "CPU 1T (ms)", "CPU OMP (ms)", "GPU batch Frontier", "GPU K x Delta", "vs CPU 1T", "vs CPU OMP",
-                 "Queries/s (GPU)", "Verify"}, "rrrrrrrrl");
+    CsvWriter csv(c.outDir + "/study_multisource_" + g.name + ".csv",
+                  {"graph", "K", "cpu_1t_ms", "cpu_omp_ms", "omp_threads", "gpu_batch_ms", "gpu_batch_delta_ms",
+                   "gpu_seq_delta_ms", "speedup_vs_1t", "speedup_vs_omp", "verify"});
+    Table t("K sources: CPU Dijkstra x K (1 thread / OpenMP " + fmt("%.0f", T) + " threads) vs GPU (batch = K sources in one run)");
+    t.setHeader({"K", "CPU 1T (ms)", "CPU OMP (ms)", "GPU batch Frontier", "GPU batch Delta", "GPU K x Delta",
+                 "vs CPU 1T", "vs CPU OMP", "Queries/s (GPU)", "Verify"}, "rrrrrrrrrl");
     GpuOptions ob = opts(GpuAlgo::Frontier, c.gpu.mapping, c.gpu.atomic, c.gpu);
     GpuOptions od = opts(GpuAlgo::DeltaStep, c.gpu.mapping, c.gpu.atomic, c.gpu);
     {   // warm-up
-        std::vector<u32> w = pickSources(g, 1, 1);
+        std::vector<u32> w = pickSources(g, 2, 1);
         solver->multiSource(w, ob, nullptr);
+        solver->multiSource(w, od, nullptr);
         solver->sssp(w[0], od, false);
     }
+    auto checkAll = [&](const std::vector<std::vector<u32>>& gd, const MultiSourceCpuResult& ref,
+                        const std::vector<u32>& srcs, const char* what, VerifyReport& v) {
+        for (u32 i = 0; i < srcs.size(); ++i)
+            for (u32 x = 0; x < g.n; ++x) {
+                v.distChecked++;
+                if (gd[i][x] != ref.dist[i][x] && v.distMismatch++ == 0)
+                    v.firstError = std::string(what) + ": dist mismatch at source " + std::to_string(srcs[i]);
+            }
+    };
     for (u32 K = 1; K <= Kmax; K *= 2) {
         std::vector<u32> srcs = pickSources(g, K, c.seed + 100 + K);
         MultiSourceCpuResult c1 = cpuMultiSource(g, srcs, 1, false);
         MultiSourceCpuResult cm = cpuMultiSource(g, srcs, T, true);
+        VerifyReport v;
         std::vector<std::vector<u32>> gd;
         GpuRunResult gb = solver->multiSource(srcs, ob, &gd);
+        checkAll(gd, cm, srcs, "batch Frontier", v);
+        GpuRunResult gdb = solver->multiSource(srcs, od, &gd);
+        checkAll(gd, cm, srcs, "batch Delta", v);
         double seq = 0;
         for (u32 s : srcs) seq += solver->sssp(s, od, false).ms;
-        VerifyReport v;
-        for (u32 i = 0; i < K; ++i) {
-            for (u32 x = 0; x < g.n; ++x) {
-                v.distChecked++;
-                if (gd[i][x] != cm.dist[i][x] && v.distMismatch++ == 0)
-                    v.firstError = "multi-source dist mismatch at source " + std::to_string(srcs[i]);
-            }
-        }
-        const double bestGpu = std::min(gb.ms, seq);
+        const double bestGpu = std::min({gb.ms, gdb.ms, seq});
         const double s1 = c1.ms / bestGpu, sm = cm.ms / bestGpu;
-        t.addRow({Cell(fmtCount(K)), Cell(fmtMs(c1.ms)), Cell(fmtMs(cm.ms)), Cell(fmtMs(gb.ms), gb.ms <= seq ? term::green() : ""),
-                  Cell(fmtMs(seq), seq < gb.ms ? term::green() : ""), Cell(fmtSpeedup(s1), speedupColor(s1)),
+        auto best = [&](double x) { return x == bestGpu ? term::green() : ""; };
+        t.addRow({Cell(fmtCount(K)), Cell(fmtMs(c1.ms)), Cell(fmtMs(cm.ms)), Cell(fmtMs(gb.ms), best(gb.ms)),
+                  Cell(fmtMs(gdb.ms), best(gdb.ms)), Cell(fmtMs(seq), best(seq)), Cell(fmtSpeedup(s1), speedupColor(s1)),
                   Cell(fmtSpeedup(sm), speedupColor(sm)), Cell(fmt("%.1f", K / (bestGpu * 1e-3))), verdictCell(v)});
         csv.row({g.name, std::to_string(K), fmt("%.4f", c1.ms), fmt("%.4f", cm.ms), std::to_string(T), fmt("%.4f", gb.ms),
-                 fmt("%.4f", seq), fmt("%.4f", s1), fmt("%.4f", sm), v.pass() ? "PASS" : "FAIL"});
+                 fmt("%.4f", gdb.ms), fmt("%.4f", seq), fmt("%.4f", s1), fmt("%.4f", sm), v.pass() ? "PASS" : "FAIL"});
         account(v);
     }
     t.print();
@@ -835,6 +917,7 @@ int main(int argc, char** argv) {
                 GpuSolver s(g, 1);
                 runAtomicStudy(g, c, s);
                 runSyncStudy(g, c, s);
+                runCompactionStudy(g, c, s);
                 runDeltaStudy(g, c, s, !all);
                 if (all) {
                     CsvWriter csv(c.outDir + "/study_mapping.csv", {"graph", "algorithm", "mapping", "time_ms", "speedup_vs_thread", "verify"});
@@ -895,6 +978,7 @@ int main(int argc, char** argv) {
             else if (m == "atomic") runAtomicStudy(g, c, solver);
             else if (m == "delta") runDeltaStudy(g, c, solver, false);
             else if (m == "sync") runSyncStudy(g, c, solver);
+            else if (m == "compaction") runCompactionStudy(g, c, solver);
             else if (m == "mapping") {
                 CsvWriter csv(c.outDir + "/study_mapping_" + g.name + ".csv", {"graph", "algorithm", "mapping", "time_ms", "speedup_vs_thread", "verify"});
                 runMappingStudy(g, c, solver, csv);

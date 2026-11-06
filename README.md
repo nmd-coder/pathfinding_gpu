@@ -104,6 +104,19 @@ này (~30 µs/vòng) chiếm phần lớn thời gian. Cải tiến: kernel **t�
 (`RelaxCtx::inCount`) và chạy grid cố định theo số SM với vòng grid-stride; Host phát liên tiếp S kernel
 rồi mới đồng bộ 1 lần. Kernel phát thừa khi biên đã rỗng kết thúc ngay. `--mode sync` đo S = 1…32.
 
+### 3.6 Nén biên bằng Prefix Sum (`--compaction scan`)
+
+Mặc định (`warp`) mỗi đỉnh được relax thành công sẽ `atomicAdd` (gộp theo warp) vào bộ đếm F_next.
+Với `--compaction scan`, kernel chỉ bật cờ `flags[v]=1`; sau đó `cub::DeviceScan::ExclusiveSum` tính
+vị trí ghi và `scatterKernel` chép đỉnh vào F_next — không còn atomic trên bộ đếm biên, thứ tự F_next
+ổn định (tăng dần theo id đỉnh). `--mode compaction` so sánh hai cách và ghi `study_compaction_*.csv`.
+
+### 3.7 Đa nguồn theo lô (batched multi-source)
+
+Với K nguồn, trạng thái được đánh chỉ số `k·n + v`; cả Frontier và Delta-Stepping xử lý K truy vấn
+trong cùng một chuỗi kernel (dùng chung bucket i của Delta-Stepping). `--mode multisource` so sánh
+CPU tuần tự, CPU OpenMP, GPU tuần tự, GPU batch Frontier và GPU batch Delta.
+
 ### 3.6 Cân bằng tải (Hybrid)
 Theo bậc đỉnh trong biên: bậc ≥ blockDim → cả block xử lý (thông tin phát qua **Shared Memory**);
 bậc ≥ 32 → cả warp (`__ballot_sync` + `__shfl_sync`); còn lại → từng luồng. Tránh warp divergence
@@ -152,6 +165,7 @@ pathfinder.exe --mode sync   --graph grid --n 1e6          :: giảm đồng b�
 pathfinder.exe --mode mapping --graph rmat --n 1048576
 pathfinder.exe --mode transfer --graph grid --n 4e6
 pathfinder.exe --mode multisource --graph grid --n 1e6 --batch 32
+pathfinder.exe --mode compaction --graph rmat --n 1048576    :: warp-atomic vs prefix-sum (CUB)
 pathfinder.exe --mode single --graph grid --n 1e6 --astar --algo delta --print-path
 :: Bản đồ thật DIMACS (tải bằng scripts\download_dimacs.ps1 NY; nếu máy chủ DIMACS không truy cập được,
 :: script tự tải SNAP roadNet-PA của Stanford)
@@ -159,7 +173,7 @@ pathfinder.exe --mode bench --graph snap --file data\roadNet-PA.txt --directed -
 pathfinder.exe --mode bench --gr data\USA-road-d.NY.gr --co data\USA-road-d.NY.co --queries 5 --save-bin data\ny.bin
 pathfinder.exe --mode verify --graph bin --file data\ny.bin
 ```
-Tùy chọn GPU: `--mapping thread|warp|hybrid`, `--atomic min|cas|nocheck`, `--delta D`, `--block 256`, `--sync-every S` (mặc định 8; 1 = đồng bộ mỗi vòng).
+Tùy chọn GPU: `--mapping thread|warp|hybrid`, `--atomic min|cas|nocheck`, `--delta D`, `--block 256`, `--sync-every S` (mặc định 8; 1 = đồng bộ mỗi vòng), `--compaction warp|scan`.
 Tắt màu khi ghi log ra file: `--no-color`.
 
 ### Ý nghĩa các cột trong bảng
@@ -173,7 +187,7 @@ Tắt màu khi ghi log ra file: `--no-color`.
 | Verify | `PASS 100%` = toàn bộ khoảng cách, cây cha và đường đi truy vết đều khớp CPU |
 
 CSV ở `results/`: `bench_sssp.csv`, `bench_astar.csv`, `summary_speedup.csv`, `study_atomic.csv`,
-`study_delta_*.csv`, `study_mapping*.csv`, `study_transfer.csv`, `study_multisource.csv`.
+`study_delta_*.csv`, `study_mapping*.csv`, `study_transfer.csv`, `study_multisource.csv`, `study_compaction_*.csv`.
 Biểu đồ: `python scripts\plot_results.py results` → `results\figures\*.png`.
 
 ## 6. Gợi ý ánh xạ sang mục lục báo cáo
@@ -193,7 +207,8 @@ Biểu đồ: `python scripts\plot_results.py results` → `results\figures\*.pn
 | 3.3.1, 3.3.3 | `--mode bench`, `--mode delta` |
 | 3.3.2 Atomic contention (+ Nsight Compute) | `--mode atomic`; chạy thêm `ncu --set full pathfinder.exe --mode single ...` |
 | 3.4.1, 3.4.3 TEPS, Speedup theo kích thước | `summary_speedup.csv`, `speedup_vs_size_*.png` |
-| 3.4.2 Multi-source vs OpenMP | `--mode multisource` |
+| 3.4.2 Multi-source vs OpenMP | `--mode multisource` (batch Frontier + batch Delta) |
+| Nén biên Prefix Sum | `--compaction scan`, `--mode compaction` |
 
 **Lưu ý khi phân tích kết quả (trung thực khoa học):** mạng đường bộ có đường kính rất lớn (hàng nghìn
 bước) và bậc thấp (~4) nên mỗi bước đồng bộ chỉ có vài nghìn đỉnh hoạt động; tăng tốc GPU cho SSSP trên

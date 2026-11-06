@@ -5,6 +5,7 @@
 //    * Đo thời gian bằng cudaEvent_t trên cùng stream
 // =============================================================================
 #include "gpu_kernels.cuh"
+#include <cub/cub.cuh>   // Prefix Sum (DeviceScan::ExclusiveSum) cho nén danh sách biên
 #include "cpu_sssp.h"   // reconstructPath
 
 #include <algorithm>
@@ -76,6 +77,10 @@ struct GpuSolver::Impl {
     u32* d_farMask = nullptr;
     u32* d_r = nullptr;                          // tập R [n]
     u32* d_rMask = nullptr;
+    u32* d_flags = nullptr;                      // cờ "vào biên kế tiếp" (Prefix Sum)
+    u32* d_offsets = nullptr;                    // kết quả Exclusive Scan
+    char* d_scanTemp = nullptr;                  // bộ nhớ tạm CUB
+    size_t scanTempBytes = 0;
     u32* d_ctr = nullptr;                        // bộ đếm hàng đợi + cờ hội tụ
     unsigned long long* d_minKey = nullptr;
     unsigned long long* d_stats = nullptr;
@@ -110,7 +115,8 @@ struct GpuSolver::Impl {
                     + (g.hasCoords() ? (size_t)n * 16 : 0)                       // tọa độ
                     + Kn * 8 + (size_t)n * 4 + (size_t)n * 2                     // state, h, active
                     + 2 * Kn * 4 + 2 * maskWords(Kn) * 4                          // F_curr/F_next + mask
-                    + 3 * (size_t)n * 4 + 2 * maskWords(n) * 4;                  // far x2, R + mask
+                    + 3 * Kn * 4 + 2 * maskWords(Kn) * 4                         // far x2, R + mask
+                    + 2 * Kn * 4;                                                // cờ + offset Prefix Sum
         size_t freeB = 0, totalB = 0;
         CUDA_CHECK(cudaMemGetInfo(&freeB, &totalB));
         if (need > freeB) {
@@ -161,11 +167,17 @@ struct GpuSolver::Impl {
         for (int i = 0; i < 2; ++i) {
             d_q[i] = dalloc<u32>(Kn);
             d_qMask[i] = dalloc<u32>(maskWords(Kn));
-            d_far[i] = dalloc<u32>(n);
+            d_far[i] = dalloc<u32>(Kn);
         }
-        d_farMask = dalloc<u32>(maskWords(n));
-        d_r = dalloc<u32>(n);
-        d_rMask = dalloc<u32>(maskWords(n));
+        d_farMask = dalloc<u32>(maskWords(Kn));
+        d_r = dalloc<u32>(Kn);
+        d_rMask = dalloc<u32>(maskWords(Kn));
+        // Nén biên bằng Prefix Sum: mảng cờ, mảng offset và bộ nhớ tạm của CUB
+        d_flags = dalloc<u32>(Kn);
+        d_offsets = dalloc<u32>(Kn);
+        CUDA_CHECK(cudaMemset(d_flags, 0, Kn * sizeof(u32)));
+        cub::DeviceScan::ExclusiveSum(nullptr, scanTempBytes, d_flags, d_offsets, (int)Kn);
+        d_scanTemp = dalloc<char>(std::max<size_t>(scanTempBytes, 16));
         d_ctr = dalloc<u32>(C_COUNT);
         d_minKey = dalloc<unsigned long long>(1);
         d_stats = dalloc<unsigned long long>(5);
@@ -178,7 +190,7 @@ struct GpuSolver::Impl {
     ~Impl() {
         void* ptrs[] = {d_row, d_col, d_w, d_lightEnd, d_x, d_y, d_state, d_h, d_act[0], d_act[1],
                         d_q[0], d_q[1], d_qMask[0], d_qMask[1], d_far[0], d_far[1], d_farMask,
-                        d_r, d_rMask, d_ctr, d_minKey, d_stats, d_srcs};
+                        d_r, d_rMask, d_ctr, d_minKey, d_stats, d_srcs, d_flags, d_offsets, d_scanTemp};
         for (void* p : ptrs) if (p) cudaFree(p);
         if (h_ctr) cudaFreeHost(h_ctr);
         if (h_minKey) cudaFreeHost(h_minKey);
@@ -285,8 +297,28 @@ struct GpuSolver::Impl {
             c.rQ = DevQueue{nullptr, nullptr, nullptr};
             return c;
         };
+        const bool scanMode = (o.compaction == Compaction::PrefixScan);
+        const size_t N = (size_t)k * n;
+        // Một vòng ở chế độ Prefix Sum: nới lỏng (đặt cờ, không atomic đẩy hàng đợi)
+        //   -> ExclusiveSum(cờ) -> scatter đỉnh có cờ vào F_next liên tục (stream compaction)
+        auto scanIter = [&](u32 inIdx) {
+            const u32 out = inIdx ^ 1u;
+            RelaxCtx c = makeIter(inIdx);
+            c.inMask = nullptr;
+            c.inCount = d_ctr + C_NEAR0 + inIdx;
+            c.nextFlags = d_flags;
+            launchRelax(SEL_ALL, astar, c, o, grid);
+            size_t tb = scanTempBytes;
+            CUDA_CHECK(cub::DeviceScan::ExclusiveSum(d_scanTemp, tb, d_flags, d_offsets, (int)N, s));
+            scatterKernel<<<divUp(N, 256), 256, 0, s>>>(d_flags, d_offsets, (u32)N, d_q[out], d_ctr + C_NEAR0 + out);
+            CUDA_CHECK_LAUNCH();
+        };
         while (cnt > 0) {
-            if (S == 1) {
+            if (scanMode) {
+                for (u32 i = 0; i < S; ++i) { scanIter(in); in ^= 1u; }
+                readCounters();
+                cnt = h_ctr[C_NEAR0 + in];
+            } else if (S == 1) {
                 // Truyền thống: 1 kernel -> đồng bộ -> Host đọc kích thước F_next
                 const u32 out = in ^ 1u;
                 zeroCounter(C_NEAR0 + out);
@@ -322,13 +354,14 @@ struct GpuSolver::Impl {
     //  Pha nặng: nới cạnh nặng (w > Delta) của R đúng 1 lần (kết quả rơi vào bucket sau)
     //  Chuyển bucket: tìm khóa nhỏ nhất trong far pile -> nhảy thẳng tới bucket không rỗng
     // ------------------------------------------------------------------------
-    void runDelta(u32 src, bool astar, u32 dst, u32 delta, const GpuOptions& o, GpuStats& st) {
-        const size_t words = maskWords(n);
+    void runDelta(u32 k, u32 src, bool astar, u32 dst, u32 delta, const GpuOptions& o, GpuStats& st) {
+        // k > 1: K nguồn xử lý chung từng bucket (phần tử = q*n + v); mỗi truy vấn vẫn đi bucket theo thứ tự tăng dần
+        const size_t words = maskWords((size_t)k * n);
         CUDA_CHECK(cudaMemsetAsync(d_qMask[0], 0, words * 4, s));
         CUDA_CHECK(cudaMemsetAsync(d_qMask[1], 0, words * 4, s));
         CUDA_CHECK(cudaMemsetAsync(d_farMask, 0, words * 4, s));
         CUDA_CHECK(cudaMemsetAsync(d_rMask, 0, words * 4, s));
-        seedKernel<<<1, 32, 0, s>>>(d_state, d_srcs, 1, n, DevQueue{d_q[0], d_ctr + C_NEAR0, d_qMask[0]}, nullptr);
+        seedKernel<<<divUp(k, 128), 128, 0, s>>>(d_state, d_srcs, k, n, DevQueue{d_q[0], d_ctr + C_NEAR0, d_qMask[0]}, nullptr);
         CUDA_CHECK_LAUNCH();
 
         u64 key0 = 0;
@@ -336,10 +369,10 @@ struct GpuSolver::Impl {
             key0 = heuristicValue(g.x[src], g.y[src], g.x[dst], g.y[dst], g.hScale);
         u64 bound = (key0 / delta + 1) * (u64)delta;
         u32 in = 0, fcur = 0;
-        u32 nearCnt = 1, farCnt = 0, rCnt = 0;
+        u32 nearCnt = k, farCnt = 0, rCnt = 0;
         const u32 bs = (u32)o.blockSize;
         const u32 S = std::max(1u, o.syncEvery);
-        const u32 grid = persistentGrid(o.blockSize, n);
+        const u32 grid = persistentGrid(o.blockSize, (size_t)k * n);
         const u64 iterCap = (4ull * n + 1000) * S;
 
         auto ctxFor = [&](const u32* inData, u32 inSize, u32* inMask, u32 nearIdx) {
@@ -430,7 +463,7 @@ struct GpuSolver::Impl {
         if (k == 0 || k > K) throw std::runtime_error("invalid batch size");
         for (u32 i = 0; i < k; ++i) if (srcs[i] >= n) throw std::runtime_error("source out of range");
         if (astar && dst >= n) throw std::runtime_error("target out of range");
-        if (k > 1) o.algo = GpuAlgo::Frontier;               // batch đa nguồn dùng Frontier
+        if (k > 1 && o.algo == GpuAlgo::NaiveRelax) o.algo = GpuAlgo::DeltaStep;   // batch: Frontier hoặc Delta
         GpuRunResult r;
         const u32 delta = o.delta ? o.delta : autoDelta();
         if (o.algo == GpuAlgo::DeltaStep) ensureLightEnd(delta);
@@ -460,7 +493,7 @@ struct GpuSolver::Impl {
         switch (o.algo) {
             case GpuAlgo::NaiveRelax: runNaive(astar, dst, o, r.stats); break;
             case GpuAlgo::Frontier:   runFrontier(k, astar, dst, o, r.stats); break;
-            case GpuAlgo::DeltaStep:  runDelta(srcs[0], astar, dst, delta, o, r.stats); break;
+            case GpuAlgo::DeltaStep:  runDelta(k, srcs[0], astar, dst, delta, o, r.stats); break;
         }
         CUDA_CHECK(cudaEventRecord(ev1, s));                 // ===== kết thúc đo =====
         CUDA_CHECK(cudaEventSynchronize(ev1));

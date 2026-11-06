@@ -84,6 +84,8 @@ struct RelaxCtx {
     DevQueue farQ;         // "far pile" (key >= bound) - Delta-Stepping
     DevQueue rQ;           // tập R: các đỉnh đã xử lý trong bucket (để nới cạnh nặng)
     u64 bound;             // cận trên bucket hiện tại; ~0 => mọi đỉnh vào nearQ
+    u32* nextFlags;        // != nullptr: chế độ Prefix Sum - chỉ đặt cờ flags[v] = 1 (ghi thường,
+                           //   không atomic), F_next được dựng sau bằng Exclusive Scan + scatter
     unsigned long long* stats;  // [5] edges, atomics, updates, pushes, số vòng có việc (hoặc nullptr)
 };
 
@@ -179,7 +181,9 @@ __device__ __forceinline__ void relaxRange(const RelaxCtx& c, u32 u, u32 du, u32
         const u32 gv = base + v;
         if (relaxAtomic<AM>(&c.state[gv], (u32)nd, u, ls)) {
             ls.updates++;
-            if (key < c.bound) {                     // vào F_next (bucket hiện tại)
+            if (c.nextFlags) {                       // Prefix Sum: đánh dấu, ghi trùng giá trị 1 là lành tính
+                c.nextFlags[gv] = 1u; ls.pushes++;
+            } else if (key < c.bound) {              // vào F_next (bucket hiện tại)
                 if (testAndSetBit(c.nearQ.mask, gv)) { pushQueue(c.nearQ, gv); ls.pushes++; }
             } else {                                 // vào far pile (bucket sau)
                 if (testAndSetBit(c.farQ.mask, gv)) { pushQueue(c.farQ, gv); ls.pushes++; }
@@ -363,6 +367,18 @@ __global__ void lightEndKernel(const u32* row, const u32* w, u32 n, u32 delta, u
             if (w[mid] <= delta) lo = mid + 1; else hi = mid;
         }
         lightEnd[u] = lo;
+    }
+}
+
+// Nén biên bằng Prefix Sum (stream compaction): đỉnh v có cờ được ghi vào vị trí offsets[v]
+// (offsets = Exclusive Scan của flags) -> F_next liên tục, không trùng lặp, không cần atomic.
+// Đồng thời xóa cờ để dùng lại ở vòng sau; luồng cuối ghi kích thước F_next.
+__global__ void scatterKernel(u32* flags, const u32* offsets, u32 N, u32* outQ, u32* outCount) {
+    const u32 v = blockIdx.x * blockDim.x + threadIdx.x;
+    if (v < N) {
+        const u32 f = flags[v];
+        if (f) { outQ[offsets[v]] = v; flags[v] = 0u; }
+        if (v == N - 1) *outCount = offsets[v] + f;
     }
 }
 

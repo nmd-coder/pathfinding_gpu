@@ -15,13 +15,13 @@ Ngày chạy: 03/11/2026. Mã nguồn: `pathfinding_gpu` (bản có `--sync-ever
 
 | Hạng mục | Số lượng |
 |---|---|
-| Lần chạy GPU được kiểm chứng | **308** |
-| Phép so khoảng cách GPU ↔ CPU `std::priority_queue` | **705.479.974** |
-| Phép kiểm cạnh cha trên cây đường đi ngắn nhất | **571.250.332** |
-| Đường đi được dựng lại và kiểm tổng trọng số | **34.452** |
+| Lần chạy GPU được kiểm chứng | **370** |
+| Phép so khoảng cách GPU ↔ CPU `std::priority_queue` | **1.172.136.328** |
+| Phép kiểm cạnh cha trên cây đường đi ngắn nhất | **640.498.528** |
+| Đường đi được dựng lại và kiểm tổng trọng số | **40.146** |
 | Lỗi | **0 → PASS 100%** |
 
-Bao phủ: 3 thuật toán (Naive / Frontier / Delta-Stepping) × 3 ánh xạ luồng × 3 chiến lược atomic × SSSP + A*, trên lưới đường bộ 10⁴–4·10⁶ đỉnh, R-MAT tới 16 triệu cạnh, mạng đường bộ thật SNAP roadNet-PA / roadNet-CA.
+Bao phủ: 3 thuật toán (Naive / Frontier / Delta-Stepping) × 3 ánh xạ luồng × 3 chiến lược atomic × SSSP + A*, trên lưới đường bộ 10⁴–4·10⁶ đỉnh, R-MAT tới 16 triệu cạnh, mạng đường bộ thật SNAP roadNet-PA / roadNet-CA. Đợt 2 (06/11/2026) bổ sung: Frontier nén bằng Prefix Sum (CUB) và đa nguồn theo lô (Frontier batch, Frontier batch + Prefix Sum, Delta-Stepping batch, K = 4), so với K lần Dijkstra CPU, cũng đạt PASS 100%.
 
 ## 3. Hệ số tăng tốc theo kích thước (mục 3.4.1 – 3.4.3)
 
@@ -106,17 +106,56 @@ Hybrid gần như không tốn thêm chi phí trên đồ thị bậc thấp, v�
 
 Pinned memory nhanh hơn 2.7×. Thêm stream không có lợi vì T4 chỉ có một copy engine theo chiều H2D và băng thông đã bão hòa PCIe.
 
-## 9. Nhiều nguồn (mục 3.4.2) — lưới 10⁶ đỉnh, CPU OpenMP 2 luồng
+## 9. Nhiều nguồn (mục 3.4.2) — CPU OpenMP 2 luồng, K nguồn ngẫu nhiên
 
-| K | CPU 1 luồng | CPU OpenMP | GPU batch Frontier | GPU K × Delta | Tăng tốc (so CPU 1T / OMP) |
-|---:|---:|---:|---:|---:|---:|
-| 1 | 193 ms | 193 ms | 101 ms | **38 ms** | 5.1× / 5.1× |
-| 8 | 1.835 ms | 1.401 ms | 1.793 ms | **406 ms** | 4.5× / 3.5× |
-| 32 | 5.757 ms | 4.199 ms | 6.605 ms | **1.539 ms** | 3.7× / 2.7× |
+Đợt 2 bổ sung **Delta-Stepping theo lô**: K truy vấn dùng chung một chuỗi kernel, trạng thái đánh chỉ số `k·n + v`, mọi truy vấn cùng xử lý bucket i. Như vậy mỗi kernel có K lần nhiều việc song song hơn, còn số lần đồng bộ thì giữ nguyên.
 
-Gộp K nguồn vào chung một biên Frontier không hiệu quả trên mạng đường bộ, vì Frontier làm thừa việc ×75. Chạy K lần Delta-Stepping nhanh hơn 3.7–5×. Hướng phát triển: Delta-Stepping dạng batch.
+**Lưới 10⁶ đỉnh** (`study_multisource_grid_1000x1000.csv`)
 
-## 10. Hạn chế đã ghi nhận
+| K | CPU 1 luồng | CPU OpenMP | GPU batch Frontier | GPU K × Delta | **GPU batch Delta** | Tăng tốc (so CPU 1T / OMP) |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 190 ms | 199 ms | 96 ms | 34 ms | 36 ms | 5.6× / 5.9× |
+| 4 | 703 ms | 501 ms | 818 ms | 206 ms | **64 ms** | 11.0× / 7.8× |
+| 8 | 1.401 ms | 1.320 ms | 1.779 ms | 412 ms | **96 ms** | 14.6× / 13.7× |
+| 32 | 6.180 ms | 4.025 ms | 6.481 ms | 1.533 ms | **455 ms** | 13.6× / 8.9× |
+
+**Mạng đường bộ thật roadNet-CA, 1,97 triệu đỉnh** (`study_multisource_roadNet-CA.txt.csv`)
+
+| K | CPU 1 luồng | CPU OpenMP | GPU batch Frontier | GPU K × Delta | **GPU batch Delta** | Tăng tốc (so CPU 1T / OMP) |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 348 ms | 355 ms | 90 ms | 34 ms | 36 ms | 10.1× / 10.3× |
+| 4 | 1.395 ms | 1.017 ms | 614 ms | 132 ms | **68 ms** | 20.5× / 15.0× |
+| 8 | 3.324 ms | 1.942 ms | 1.469 ms | 268 ms | **154 ms** | 21.6× / 12.6× |
+| 32 | 11.598 ms | 9.441 ms | 7.538 ms | 1.108 ms | **731 ms** | 15.9× / 12.9× |
+
+Nhận xét:
+* Khi K ≥ 2, Delta-Stepping theo lô nhanh hơn chạy K lần Delta-Stepping 1,5–3,4× và nhanh hơn CPU 1 luồng 11–22×. Thông lượng cao nhất đạt khoảng 60–80 truy vấn/giây.
+* Frontier theo lô vẫn chậm, ngang CPU, vì Frontier làm thừa rất nhiều việc trên đồ thị đường kính lớn. Vì vậy, với nhiều nguồn, mô hình bucket của Delta-Stepping là lựa chọn phù hợp.
+* Khi K = 32 trên lưới, mức tăng tốc giảm nhẹ. Lý do là bộ nhớ trạng thái lên tới K·n = 32 triệu phần tử, nên cache L2 4 MB của T4 không còn đủ.
+
+![Đa nguồn – lưới](figures/multisource_grid_1000x1000.png)
+![Đa nguồn – roadNet-CA](figures/multisource_roadNet-CA.txt.png)
+
+## 10. Nén biên bằng Prefix Sum (mục 2.3.3, `--compaction scan`)
+
+Hai cách xây F_next được so sánh, đều dùng Frontier SSSP, ánh xạ hybrid, trung bình 3 truy vấn:
+* **warp-atomic** (mặc định): đặt bitmask chống trùng bằng `atomicOr`, sau đó dùng `atomicAdd` gộp theo warp vào bộ đếm hàng đợi.
+* **prefix-sum**: kernel chỉ bật `flags[v] = 1`, sau đó chạy `cub::DeviceScan::ExclusiveSum` rồi `scatterKernel`. Cách này không có atomic trên bộ đếm, và F_next có thứ tự tăng dần theo id đỉnh.
+
+| Đồ thị | warp-atomic | prefix-sum | Tỉ lệ | Ghi đỉnh vào biên (warp / scan) |
+|---|---:|---:|---:|---:|
+| Lưới 10⁶ đỉnh | **120,3 ms** | 151,6 ms | 0,79× | 72,6 tr / 105,5 tr |
+| roadNet-CA | **131,7 ms** | 138,8 ms | 0,95× | 53,9 tr / 73,6 tr |
+| R-MAT 2²⁰ đỉnh, 8,4 tr cạnh | 41,4 ms | **30,3 ms** | **1,37×** | 2,3 tr / 3,0 tr |
+
+Nhận xét:
+* Trên **R-MAT** (biên rất rộng, ít vòng lặp), Prefix Sum nhanh hơn 1,37×. Lý do: scan và scatter có chi phí cố định O(n) mỗi vòng, nhưng chi phí này nhỏ so với tranh chấp atomic khi hàng triệu đỉnh cùng vào biên. Ngoài ra, thứ tự đỉnh tăng dần giúp truy cập CSR liền mạch hơn.
+* Trên **mạng đường bộ** (hơn 800–1.500 vòng, biên hẹp), mỗi vòng vẫn phải scan toàn bộ n cờ, nên warp-atomic nhanh hơn. Cách gộp atomic theo warp đã giảm phần lớn tranh chấp.
+* Vì vậy, hệ thống giữ `warp-atomic` làm mặc định, còn `--compaction scan` dành cho đồ thị kiểu mạng xã hội hoặc có bậc lệch. Hướng phát triển là tự chọn cách nén theo kích thước biên (như kỹ thuật direction-optimizing).
+
+![Compaction](figures/compaction.png)
+
+## 11. Hạn chế đã ghi nhận
 * Máy chủ DIMACS (diag.uniroma1.it) không truy cập được từ Colab, nên dữ liệu đường bộ thật lấy từ SNAP (không có trọng số và tọa độ gốc).
 * CPU baseline của Colab chỉ có 2 luồng; trên máy nhiều nhân, CPU OpenMP sẽ mạnh hơn.
-* Chưa đo bằng Nsight Compute (Colab không cấp quyền profiler counters cho người dùng thường).
+* Chưa đo bằng Nsight Compute vì Colab không cấp quyền đọc profiler counters cho người dùng thường. Thay vào đó, chương trình dùng bộ đếm trong kernel (số atomic, số lần ghi biên, số cạnh duyệt) để phân tích. Khi có máy có quyền profiler thì chạy `ncu --set full ./pathfinder --mode single ...`.

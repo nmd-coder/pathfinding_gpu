@@ -16,6 +16,9 @@ const char* toString(GpuAlgo a) {
     }
     return "?";
 }
+const char* toString(Compaction c) {
+    return c == Compaction::PrefixScan ? "prefix-sum" : "warp-atomic";
+}
 const char* toString(Mapping m) {
     switch (m) {
         case Mapping::Thread: return "thread";

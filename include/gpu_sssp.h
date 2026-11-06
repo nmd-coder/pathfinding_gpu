@@ -28,6 +28,13 @@ enum class AtomicMode {
     MinNoCheck    // atomicMin "mù" (không đọc trước) - dùng để đo mức tranh chấp
 };
 
+// ---- Cách dựng biên kế tiếp F_next (2.3.3) ----
+enum class Compaction {
+    WarpAtomic,   // bitmask lọc trùng + bộ đếm đuôi gộp theo warp (1 atomicAdd / nhóm luồng)  [mặc định]
+    PrefixScan    // mảng cờ + Prefix Sum (CUB DeviceScan::ExclusiveSum) + scatter (không atomic khi đẩy)
+};
+
+const char* toString(Compaction c);
 const char* toString(GpuAlgo a);
 const char* toString(Mapping m);
 const char* toString(AtomicMode a);
@@ -41,6 +48,7 @@ struct GpuOptions {
     // Số kernel nới lỏng phát liên tiếp giữa 2 lần đồng bộ Host-Device (Frontier / Delta).
     // 1 = đồng bộ sau mỗi vòng (cách truyền thống). >1: kernel tự đọc kích thước biên trên GPU.
     u32 syncEvery = 8;
+    Compaction compaction = Compaction::WarpAtomic;   // chỉ áp dụng cho Frontier
 };
 
 // Bộ đếm thống kê thu từ kernel (gom theo warp rồi mới atomicAdd -> chi phí không đáng kể)
@@ -102,7 +110,7 @@ public:
     GpuRunResult sssp(u32 src, const GpuOptions& opt, bool copyBack = true);
     // Điểm - điểm A* song song (cắt tỉa theo cận trên dist[target] + heuristic)
     GpuRunResult astar(u32 src, u32 dst, const GpuOptions& opt);
-    // Đa nguồn: K nguồn trong 1 biên chung (phần tử = k*n + v), thuật toán Frontier
+    // Đa nguồn: K nguồn xử lý chung (phần tử = k*n + v), thuật toán Frontier hoặc Delta-Stepping
     GpuRunResult multiSource(const std::vector<u32>& srcs, const GpuOptions& opt,
                              std::vector<std::vector<u32>>* distOut);
 
